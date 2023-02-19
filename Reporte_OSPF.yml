@@ -1,0 +1,590 @@
+#--------------------------LISTAR TAREAS-----------------------------------------------------------------
+#ansible-playbook obtener-hora.yml --list-task
+
+#--------------------------APLCAR PLAYBOOK---------------------------------------------------------------
+#ansible-playbook obtener-hora.yml -v -e "antigua_vrf=nombre_viejo nueva_vrf=nombre_nuevo"
+# -e recibo parametros por command line
+#--------------------------------------------------------------------------------------------------------
+#ansible-playbook Reporte_OSPF.yam --tags="cisco"
+#ansible-playbook Reporte_OSPF.yam --tags="huawei"
+#----------------------VERIFICACIONES -----------------
+
+---
+- name: Playbook for tests
+  hosts: NORMALIZACION
+  connection: network_cli
+  gather_facts: no
+  serial: 1
+  #vars: 
+  
+  tasks:  
+
+    - name: EQUIPOS OSPF HUAWEI
+      ce_command:
+        commands:
+         # - ' display ospf peer brief '
+         - ' dis int desc | include JVM '
+      register: OSPF
+      retries: 2
+      delay: 2
+      ignore_unreachable: yes
+      ignore_errors: yes 
+      tags:
+        - prueba
+
+
+    - name: SALIDA OSPF HUAWEI
+      debug:
+        msg:
+          - "{{OSPF | to_nice_json }}"
+      ignore_unreachable: yes
+      ignore_errors: yes 
+      tags:
+        - prueba
+        
+        
+    - name: PARSEO OSPF HUAWEI
+      set_fact: 
+        datos_OSPF: "{{ datos_OSPF | default([])  + [ item | regex_search('\\s+(\\d\\..*)') ] }}"  
+      with_items: "{{ OSPF.stdout_lines[0] }}"
+      when:
+        - item | regex_search('\\s+(\\d\\..*)') is not none
+      ignore_unreachable: yes
+      ignore_errors: yes 
+      tags:
+        - huawei
+    
+    - name: SALIDA PARSEO OSPF HUAWEI
+      debug:
+        msg:
+          - "{{ datos_OSPF | to_nice_json }}"
+      when:
+      - " datos_OSPF is defined "
+      ignore_unreachable: yes
+      ignore_errors: yes 
+      # tags:
+        # - huawei
+   
+    - name: LISTAR INTERFACES Eth-Trun
+      debug:
+        msg: "{{item | regex_search('[\\d\\.]+\\s+(Eth\\-\\w+\\.?\\d+|GE\\d+\\/\\d+\\/\\d+|100\\w+\\/\\d+\\/\\d+)', '\\1')}}" 
+      with_items:
+        - "{{OSPF.stdout_lines[0]}}"
+      when:
+        - "item | regex_search('[\\d\\.]+\\s+(Eth\\-\\w+\\.?\\d+|GE\\d+\\/\\d+\\/\\d+|100\\w+\\/\\d+\\/\\d+)') is not none"
+      # tags:
+        # - huawei
+        
+    - name: PARSEO INTERFACES Eth-Trun - 100 - GE HUAWEI
+      set_fact: 
+        datos_OSPF_interface_huawei: "{{ datos_OSPF_interface_huawei | default([])  + [ item | regex_search('[\\d\\.]+\\s+(Eth\\-\\w+\\.?\\d+|GE\\d+\\/\\d+\\/\\d+\\.?\\d?\\d?\\d?\\d?|100\\w+\\/\\d+\\/\\d+|25\\w+\\/\\d+\\/\\d+\\.?\\d+|[a-zA-Z]+[\\d\\/\\.]+)', '\\1') | first ] }}"  
+      with_items: "{{ OSPF.stdout_lines[0] }}"
+      when:
+        - item | regex_search('[\\d\\.]+\\s+(Eth\\-\\w+\\.?\\d+|GE\\d+\\/\\d+\\/\\d+\\.?\\d?\\d?\\d?\\d?|100\\w+\\/\\d+\\/\\d+|25\\w+\\/\\d+\\/\\d+\\.?\\d+|[a-zA-Z]+[\\d\\/\\.]+)') is not none
+      ignore_unreachable: yes
+      ignore_errors: yes 
+      tags:
+        - huawei
+        
+    - name: SALIDA PARSEO INTERFACES Eth-Trun - 100 - GE HUAWEI
+      debug:
+        msg:
+          - "{{ datos_OSPF_interface_huawei | to_nice_json }}"
+      when:
+          - " datos_OSPF_interface_huawei is defined "
+      ignore_unreachable: yes
+      ignore_errors: yes 
+      tags:
+          - huawei
+          
+    - name: LISTAR INTERFACES Eth-Trun ITEM
+      set_fact:
+        costo_interface: "{{ costo_interface | default([]) + [item | regex_replace('GE' ,'GigabitEthernet') | regex_replace('100GigabitEthernet' ,'100GE') | regex_replace('25GigabitEthernet', '25GE')]  }}" 
+      with_items:
+        - "{{datos_OSPF_interface_huawei}}"
+      when:
+        - "datos_OSPF_interface_huawei is defined"
+        # - " '100GE' not in item"
+        # - "item != '100GE' "
+      ignore_unreachable: yes
+      ignore_errors: yes 
+      tags:
+        - huawei
+        
+    - name: SALIDA INTERFACE Eth-Trun - 100 - GE HUAWEI
+      debug:
+        msg:
+          - "{{ costo_interface }}"
+      when:
+          - " costo_interface is defined "
+      ignore_unreachable: yes
+      ignore_errors: yes 
+      tags:
+          - huawei
+        
+        
+    
+    - name: DISPLAY OSPF INTERFACE {{item}}
+      ce_command:
+        commands:
+         - ' display ospf interface {{item}} | i Cost '
+      register: Cost_Huawei
+      retries: 2
+      delay: 2
+      until: Cost_Huawei is not failed
+      with_items: "{{ costo_interface }}"
+      ignore_unreachable: yes
+      ignore_errors: yes 
+      tags:
+        - huawei
+        
+    - name: SALIDA INTERFACE COSTO
+      debug:
+        msg: "{{Cost_Huawei | to_nice_json }}" 
+      when:
+        - "Cost_Huawei is defined"
+      ignore_unreachable: yes
+      ignore_errors: yes 
+      tags:
+        - huawei
+        
+        
+    - name: Parseo OSPF COSTO HUAWEI
+      set_fact:
+        ospf_cost_equipo_huawei: "{{ospf_cost_equipo_huawei | default([]) + [ 's/c' if('Cost' not in item['stdout'][0]) else item['stdout'][0]  | regex_search('\\sCost:\\s(\\d+)', '\\1') | first ] }}"
+      with_items:
+        - "{{Cost_Huawei['results']}}"
+      when:
+        - " item['stdout_lines'][0][6] is not none"
+      ignore_unreachable: yes
+      ignore_errors: yes 
+      tags:
+        - huawei
+        
+    - name: SALIDA INTERFACE COSTO
+      debug:
+        msg: "{{ospf_cost_equipo_huawei | to_nice_json }}" 
+      when:
+        - "ospf_cost_equipo_huawei is defined"
+      ignore_unreachable: yes
+      ignore_errors: yes 
+      tags:
+        - huawei
+             
+          
+    - name: LISTAR OSPF Y COSTOS HUAWEI
+      debug:
+        msg: "{{item[0] + ' ' + item[1] }}"
+      with_together:
+        - "{{datos_OSPF}}"
+        - "{{ospf_cost_equipo_huawei}}"
+      when:
+        - "item[0] is defined"
+        - "item[1] is defined"
+      ignore_unreachable: yes
+      ignore_errors: yes 
+      tags:
+        - huawei
+
+          
+    - name: EXPORTAR SALIDA DATOS OSPF HUAWEI
+      lineinfile:
+        dest: "/home/u623994/Ansible/Rhonald/output/huawei/new/{{inventory_hostname}}_OSPF.csv" 
+        line: "{{ item[0] + ' ' + item[1] }}"
+    # si no existe lo crea
+        create: yes
+    # permisos Lectura Escritura
+        mode: '666'
+        insertafter: EOF
+      with_together:
+         - "{{datos_OSPF}}"
+         - "{{ospf_cost_equipo_huawei}}"
+      when:
+        - "item[0] is defined"
+        - "item[1] is defined"
+      ignore_unreachable: yes
+      ignore_errors: yes 
+      tags:
+        - huawei
+        
+   ######################################### CISCO  #############################################
+   
+   
+    - name: EQUIPOS OSPF CISCO
+      # iosxr_command:
+      ios_command:
+        commands:
+         - 'show ip ospf neighbor'
+         # - 'show version'
+         # - 'show ip ospf int brief | i P2P '
+         # - 'show ip ospf int brief | i (1/1)$ '
+         - 'show ip ospf int brief | exclude 0/0'
+      register: Ospf_Cisco
+      retries: 2
+      delay: 2
+      ignore_unreachable: yes
+      ignore_errors: yes 
+      tags:
+        - cisco
+
+
+    - name: SALIDA OSPF CISCO
+      debug:
+        msg:
+          - "{{Ospf_Cisco | to_nice_json }}"
+      tags:
+        - cisco
+      ignore_unreachable: yes
+      ignore_errors: yes 
+          
+          
+    - name: LISTAR INTERFACES OSPF CISCO ITEM 0
+      debug:
+        msg: "{{item | regex_search('\\s?(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}.*)') | first}}" 
+      with_items:
+        - "{{Ospf_Cisco.stdout_lines[0]}}"
+      when:
+        - "item | regex_search('\\s?(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}.*)') is not none"
+      # tags:
+        # - cisco
+        
+        
+    - name: PARSEO OSPF Cisco ITEM 0
+      set_fact: 
+        datos_OSPF_Cisco: "{{ datos_OSPF_Cisco | default([])  + [ item | regex_search('\\s?(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}.*)') ] }}"  
+      with_items: "{{ Ospf_Cisco.stdout_lines[0] }}"
+      when:
+        - item | regex_search('\\s?(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}.*)') is not none
+      ignore_unreachable: yes
+      ignore_errors: yes 
+      tags:
+        - cisco
+    
+    - name: SALIDA PARSEO OSPF Cisco ITEM 0
+      debug:
+        msg:
+          - "{{ datos_OSPF_Cisco | to_nice_json }}"
+      when:
+          - " datos_OSPF_Cisco is defined "
+      ignore_unreachable: yes
+      ignore_errors: yes 
+      tags:
+        - cisco
+        
+        
+    ################################## ITEM 1 ############################################
+        
+    - name: LISTAR OSPF Cisco ITEM 1 AREA Y COSTO EQUIPOS VIEJOS
+      debug:
+        msg: "{{item | regex_search('\\d+\\s+(\\d|\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})\\s+[\\d\\.\\/]+\\s+(\\d+)', '\\1', '\\2') | trim}}" 
+      with_items:
+        - "{{Ospf_Cisco.stdout_lines[1]}}"
+      when:
+        - "item | regex_search('\\d+\\s+(\\d|\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})\\s+[\\d\\.\\/]+\\s+(\\d+)') is not none"
+      ignore_unreachable: yes
+      ignore_errors: yes 
+      # tags:
+        # - cisco
+        
+    - name: PARSEO OSPF Cisco ITEM 1 AREA Y COSTO EQUIPOS VIEJOS 
+      set_fact: 
+        datos_OSPF_Cisco_viejos: "{{ datos_OSPF_Cisco_viejos | default([])  + [ item | regex_search('\\d+\\s+(\\d|\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})\\s+[\\d\\.\\/]+\\s+(\\d+)', '\\1', '\\2') | trim  ] }}"  
+      with_items: "{{ Ospf_Cisco.stdout_lines[1] }}"
+      when:
+        - item | regex_search('\\d+\\s+(\\d|\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})\\s+[\\d\\.\\/]+\\s+(\\d+)', '\\1', '\\2') is not none
+      ignore_unreachable: yes
+      ignore_errors: yes 
+      tags:
+        - cisco
+        
+    - name: SALIDA PARSEO OSPF Cisco ITEM 1 AREA Y COSTO EQUIPOS VIEJOS
+      debug:
+        msg:
+          - "{{ datos_OSPF_Cisco_viejos | to_nice_json}}"
+      when:
+          - " datos_OSPF_Cisco_viejos is defined "
+      ignore_unreachable: yes
+      ignore_errors: yes 
+      tags:
+          - cisco
+        
+        
+        
+        
+    - name: PARSEO OSPF Cisco ITEM 1 AREA Y COSTO 
+      set_fact: 
+        datos_OSPF_Cisco_1: "{{ datos_OSPF_Cisco_1 | default([])  + [ item | regex_search('\\s\\d+\\s+(\\d+)\\s+[\\d\\.\\/]+\\s+(\\d+)', '\\1', '\\2') | trim ] }}"  
+      with_items: "{{ Ospf_Cisco.stdout_lines[1] }}"
+      when:
+        - item | regex_search('\\s\\d+\\s+(\\d+)\\s+[\\d\\.\\/]+\\s+(\\d+)', '\\1', '\\2') is not none
+      ignore_unreachable: yes
+      ignore_errors: yes 
+      # tags:
+        # - cisco
+    
+    - name: SALIDA PARSEO OSPF Cisco ITEM 1 AREA Y COSTO
+      debug:
+        msg:
+          - "{{ datos_OSPF_Cisco_1 | to_nice_json}}"
+      when:
+          - " datos_OSPF_Cisco_1 is defined "
+      ignore_unreachable: yes
+      ignore_errors: yes       
+      # tags:
+          # - cisco
+        
+        
+    - name: LISTAR ITEM 0 + ITEM 1 CISCO
+      debug:
+        msg: "{{item[0] + ' ' + item[1] }}"
+      with_together:
+        - "{{datos_OSPF_Cisco}}"
+        - "{{datos_OSPF_Cisco_1}}"
+        # - "{{datos_OSPF_Cisco_viejos}}"
+      when:
+        - "item[0] is defined"
+        - "item[1] is defined"
+      ignore_unreachable: yes
+      ignore_errors: yes 
+      # tags:
+        # - cisco
+
+        
+    - name: Crear archivo sin resultados
+      connection: local
+      shell: echo "Neighbor_ID;Pri;State;;Dead_Time;Address;Interface;Cost" > /home/u623994/Ansible/Rhonald/output/{{inventory_hostname}}_OSPF.csv
+      # tags:
+        # - cisco
+        
+    - name: EXPORTAR SALIDA DATOS OSPF HUAWEI
+      lineinfile:
+        dest: "/home/u623994/Ansible/Rhonald/output/cisco/{{inventory_hostname}}_OSPF.csv" 
+        line: "{{ item[0] + ' ' + item[1] }}"
+    # si no existe lo crea
+        create: yes
+    # permisos Lectura Escritura
+        mode: '666'
+        insertafter: EOF
+      with_together:
+        - "{{datos_OSPF_Cisco}}"
+        # - "{{datos_OSPF_Cisco_1}}"
+        - "{{datos_OSPF_Cisco_viejos}}"
+      when:
+        - "item[0] is defined"
+        - "item[1] is defined"
+      ignore_unreachable: yes
+      ignore_errors: yes 
+      # tags:
+        # - cisco
+        
+        
+######################################### JUNIPER  #############################################
+   
+   
+    - name: EQUIPOS OSPF JUNIPER
+      junos_command:
+        commands:
+         - 'show ospf neighbor'
+         - 'show ospf interface brief | match PtToPt'
+      register: Ospf_Juniper
+      retries: 2
+      delay: 2
+      ignore_unreachable: yes
+      ignore_errors: yes 
+      tags:
+        - juniper
+
+
+    - name: SALIDA OSPF JUNIPER
+      debug:
+        msg:
+          - "{{Ospf_Juniper | to_nice_json }}"
+      ignore_errors: yes 
+      tags:
+        - juniper
+        
+        
+    - name: LISTAR INTERFACES OSPF JUNIPER ITEM 0
+      debug:
+        msg: "{{item | regex_search('(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}.*)')}}" 
+      with_items:
+        - "{{Ospf_Juniper.stdout_lines[0]}}"
+      when:
+        - "item | regex_search('(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})') is not none"
+      # tags:
+        # - juniper
+          
+          
+    - name: PARSEO INTERFACES OSPF JUNIPER ITEM 0
+      set_fact: 
+        datos_OSPF_Juniper: "{{ datos_OSPF_Juniper | default([])  + [ item | regex_search('(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}.*)') | trim ] }}"  
+      with_items: "{{ Ospf_Juniper.stdout_lines[0] }}"
+      when:
+        - item | regex_search('(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}.*)') is not none
+      ignore_errors: yes 
+      tags:
+        - juniper
+    
+    - name: SALIDA PARSEO OSPF JUNIPER ITEM 0
+      debug:
+        msg:
+          - "{{ datos_OSPF_Juniper | to_nice_json}}"
+      when:
+          - " datos_OSPF_Juniper is defined "
+      ignore_errors: yes 
+      tags:
+          - juniper
+          
+    
+        
+    - name: LISTAR AREA OSPF JUNIPER 
+      debug:
+        msg: "{{item | regex_search('PtToPt\\s+([\\d\\.]+)', '\\1')}}" 
+      with_items:
+        - "{{Ospf_Juniper.stdout_lines[1]}}"
+      when:
+        - "item | regex_search('PtToPt\\s+([\\d\\.]+)') is not none"
+      # tags:
+        # - juniper
+        
+        
+    - name: PARSEO AREA OSPF JUNIPER 
+      set_fact: 
+        datos_OSPF_Area: "{{ datos_OSPF_Area | default([])  + [ item | regex_search('PtToPt\\s+([\\d\\.]+)', '\\1') | first ] }}"  
+      with_items: "{{ Ospf_Juniper.stdout_lines[1] }}"
+      when:
+        - item | regex_search('PtToPt\\s+([\\d\\.]+)', '\\1') is not none
+      ignore_errors: yes 
+      tags:
+        - juniper
+    
+    - name: SALIDA PARSEO AREA OSPF JUNIPER
+      debug:
+        msg:
+          - "{{ datos_OSPF_Area | to_nice_json}}"
+      when:
+          - " datos_OSPF_Area is defined "
+      ignore_errors: yes 
+      tags:
+          - juniper
+    
+        
+        
+    - name: LISTAR INTERFACES OSPF JUNIPER ITEM 1
+      debug:
+        msg: "{{item | regex_search('(\\w+\\d+\\.\\d+)')}}" 
+      with_items:
+        - "{{Ospf_Juniper.stdout_lines[1]}}"
+      when:
+        - "item | regex_search('(\\w+\\d+\\.\\d+)') is not none"
+      # tags:
+        # - juniper
+        
+    
+    - name: PARSEO INTERFACE OSPF JUNIPER 
+      set_fact: 
+        datos_OSPF_Interface: "{{ datos_OSPF_Interface | default([])  + [ item | regex_search('(\\w+\\d+\\.\\d+|\\w+\\.\\d+|\\w+[\\-\\d\\/\\.]+)', '\\1') | first ] }}"  
+      with_items: "{{ Ospf_Juniper.stdout_lines[1] }}"
+      when:
+        - item | regex_search('(\\w+\\d+\\.\\d+|\\w+\\.\\d+|\\w+[\\-\\d\\/\\.]+)', '\\1') is not none
+      ignore_errors: yes 
+      tags:
+        - juniper
+        
+    - name: SALIDA PARSEO INTERFACE OSPF JUNIPER
+      debug:
+        msg: "{{datos_OSPF_Interface | to_nice_json}}" 
+      when:
+        - "datos_OSPF_Interface is defined"
+      ignore_errors: yes 
+      tags:
+        - juniper
+        
+        
+    - name: EQUIPOS OSPF JUNIPER
+      junos_command:
+        commands:
+         - 'show ospf interface {{item}} detail | match Cost'
+      register: Cost
+      retries: 2
+      delay: 2
+      until: Cost is not failed
+      with_items: "{{ datos_OSPF_Interface }}"
+      ignore_errors: yes 
+      tags:
+        - juniper
+        
+    - name: SALIDA INTERFACE COSTO
+      debug:
+        msg: "{{Cost | to_nice_json}}" 
+      when:
+        - "Cost is defined"
+      ignore_errors: yes 
+      tags:
+        - juniper
+        
+        
+    - name: Parseo OSPF COSTO JUNIPER
+      set_fact:
+        ospf_cost_equipo: "{{ospf_cost_equipo | default([]) + [ item['stdout'][0]  | regex_search('\\sCost:\\s(\\d+)', '\\1') | first ] }}"
+      with_items:
+        - "{{Cost['results']}}"
+      when:
+        - " item['stdout'][0] is not none"
+      ignore_errors: yes 
+      tags:
+        - juniper
+        
+    - name: SALIDA INTERFACE COSTO
+      debug:
+        msg: "{{ospf_cost_equipo | to_nice_json}}" 
+      when:
+        - "ospf_cost_equipo is defined"
+      ignore_errors: yes 
+      tags:
+        - juniper
+        
+        
+    - name: LISTAR ITEM 0 + ITEM 1 + ITEM 2 JUNIPER
+      debug:
+        msg: "{{item[0] + ' ' + item[1] + ' ' + item[2] }}"
+      with_together:
+        - "{{datos_OSPF_Juniper}}"
+        - "{{datos_OSPF_Area}}"
+        - "{{ospf_cost_equipo}}"
+      when:
+        - "item[0] is defined"
+        - "item[1] is defined"
+        - "item[2] is defined"
+      ignore_errors: yes 
+      tags:
+        - juniper
+        
+    - name: Crear archivo sin resultados
+      connection: local
+      shell: echo "Address;Interface;State;ID;Pri;Dead;Area;Costo" > /home/u623994/Ansible/Rhonald/output/juniper/{{inventory_hostname}}_OSPF.csv
+      ignore_errors: yes 
+      # tags:
+        # - juniper    
+        
+        
+    - name: EXPORTAR SALIDA DATOS OSPF HUAWEI
+      lineinfile:
+        dest: "/home/u623994/Ansible/Rhonald/output/juniper/new/{{inventory_hostname}}_OSPF.csv" 
+        line: "{{ item[0] + ' ' + item[1] + ' ' + item[2] }}"
+    # si no existe lo crea
+        create: yes
+    # permisos Lectura Escritura
+        mode: '666'
+        insertafter: EOF
+      with_together:
+        - "{{datos_OSPF_Juniper}}"
+        - "{{datos_OSPF_Area}}"
+        - "{{ospf_cost_equipo}}"
+      when:
+        - "item[0] is defined"
+        - "item[1] is defined"
+        - "item[2] is defined"
+      ignore_errors: yes 
+      tags:
+        - juniper    
