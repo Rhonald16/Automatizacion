@@ -22,8 +22,7 @@
     - name: EQUIPOS OSPF HUAWEI
       ce_command:
         commands:
-         # - ' display ospf peer brief '
-         - ' dis int desc | include JVM '
+          - ' display ospf peer brief '
       register: OSPF
       retries: 2
       delay: 2
