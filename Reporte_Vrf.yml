@@ -1,0 +1,395 @@
+
+#--------------------------LISTAR TAREAS-----------------------------------------------------------------
+#ansible-playbook obtener-hora.yml --list-task
+
+#--------------------------APLCAR PLAYBOOK---------------------------------------------------------------
+#ansible-playbook obtener-hora.yml -v -e "antigua_vrf=nombre_viejo nueva_vrf=nombre_nuevo"
+# -e recibo parametros por command line
+#--------------------------LISTAR TAREAS-----------------------------------------------------------------
+#ansible-playbook QoS_MOVIL.yml --list-task
+
+#--------------------------APLCAR PLAYBOOK---------------------------------------------------------------
+
+# ansible-playbook QoS_MOVIL.yml -v -e vpn=2G     solo para esta vpn VPN-PERSONAL-ABIS-2G-BSC
+# ansible-playbook QoS_MOVIL.yml -v -e vpn=3G para todas las demas
+# ansible-playbook QoS_II.yml -v --tags="configuration"
+#--------------------------------------------------------------------------------------------------
+#----------------------VERIFICACIONES -----------------
+
+
+
+#----------------LISTAR INTERFACES CON VRF vpn-personal-iub-3G---------------
+
+- name: Playbook for tests
+  hosts: NORMALIZACION
+  connection: network_cli
+  gather_facts: no
+  #vars: 
+    
+
+  
+  tasks:
+  
+    - name: LISTAR INTERFACES HUAWEI TODAS LAS VRFs
+      ce_command:
+        commands:
+        
+          # - 'dis ip vpn-instance vpn-personal-gomran interface'
+          # - 'dis ip vpn-instance vpn-personal-abis-2G interface'
+          # - 'dis ip vpn-instance vpn-personal-iub-3G interface'
+          # - 'dis ip vpn-instance vpn-personal-S1MME interface'
+          # - 'dis ip vpn-instance vpn-personal-s1 interface'
+          # - 'dis ip vpn-instance vpn-mvs-RS-LTE-amba interface'
+          # - 'dis ip vpn-instance vpn-claro-RS-LTE-amba interface'
+          # - 'dis ip vpn-instance VPN-PERSONAL-IUB-3G-RNC interface'
+          # - 'dis ip vpn-instance VPN-PERSONAL-ABIS-2G-BSC interface'  
+          # - 'dis ip vpn-instance vpn-personal-iu interface'
+          # - 'dis ip vpn-instance vpn-personal-iur interface'
+          - 'dis ip vpn-instance vpn-personal-voz interface'
+          
+      register: vrf
+      retries: 2
+      delay: 2
+      until: vrf is not failed
+      
+        
+        
+    - debug:
+        msg:
+          - "{{ vrf | to_nice_json }}"
+    
+    
+ ################################## PARSEO vpn-personal-voz   #######################################
+
+    - name: ALMACENAR INTERFACES POR VRF vpn-personal-voz
+      set_fact:
+        int_vpn_voz: "{{ int_vpn_voz | default([]) + [ item | regex_search('\\s+([G|E]\\w+[\\-\\/\\d\\w]*\\.{1}\\d*)|\\s+(Vlanif\\d+)\\.*') | trim ] }}"
+      delegate_to: localhost
+      with_items:
+        - "{{vrf['stdout_lines'][0]}}"
+      when:
+        - "item | regex_search('\\s+([G|E]\\w+[\\-\\/\\d\\w]*\\.{1}\\d*)|\\s+(Vlanif\\d+)\\.*') is not none"
+      tags:
+        - configuration
+
+
+    # - name: LISTAR int_vpn_voz
+      # debug:
+        # msg: "{{item | regex_replace('Vlanif' ,'vlan ')}}" 
+      # with_items:
+        # - "{{int_vpn_voz}}"
+      # tags:
+        # - configuration
+        
+    - name: LISTAR INTERFACES vpn-personal-voz
+      ce_command:
+        commands:
+          - "dis int description {{item | regex_replace('Vlanif' ,'vlan ')}}"
+      register: personal_voz_int
+      retries: 2
+      delay: 2
+      until: personal_voz_int is not failed 
+      with_items:
+        - "{{int_vpn_voz}}"
+      when:
+        - "int_vpn_voz is defined"
+      tags:
+        - configuration
+
+    - name: ALMACENAR INTERFACES vpn-personal-voz UNIFICADA HUAWEI 3G - RNC - BSC 
+      set_fact:
+        int_vpn_voz_unificada: "{{int_vpn_voz_unificada | default([]) + [' ' + item[0]] }}"
+      delegate_to: localhost
+      with_together:
+        - "{{int_vpn_voz}}"
+        - "{{personal_voz_int['results']}}"
+      when:
+        - "int_vpn_voz is defined"
+        - "'RNC' in item[1]['stdout'][0] or 'BSC' in item[1]['stdout'][0]"
+      tags:
+        - configuration
+        
+        
+    - name: LISTAR int_vpn_voz_unificada
+      debug:
+        msg: "{{int_vpn_voz_unificada}}" 
+      tags:
+        - configuration
+ 
+    
+ ################################## PARSEO VRF FISICAS   #######################################
+    
+    # - name: Parseo VRF FISICAS
+      # set_fact:
+        # datos_vrf: "{{ datos_vrf | default([]) + [item | regex_search('\\s+([G]\\w*[\\/\\d]*)') | trim ] }}"
+      # when: 
+        # - vrf is not failed
+        # - item | regex_search('\\s+([G]\\w*[\\/\\d]*)') is not none
+      # with_items: "{{ vrf['stdout_lines'][0] | default ([]) + 
+                      # vrf['stdout_lines'][1] | default ([]) + 
+                      # vrf['stdout_lines'][2] | default ([]) +
+                      # vrf['stdout_lines'][3] | default ([]) +
+                      # vrf['stdout_lines'][4] | default ([]) +
+                      # vrf['stdout_lines'][5] | default ([]) +
+                      # vrf['stdout_lines'][6] | default ([]) +
+                      # vrf['stdout_lines'][7] | default ([]) +
+                      # vrf['stdout_lines'][8] | default ([]) +
+                      # vrf['stdout_lines'][9] | default ([]) +
+                      # vrf['stdout_lines'][10] | default ([]) +
+                      # vrf['stdout_lines'][11] | default ([]) 
+                    
+                    # }}"
+    
+    
+    # - debug: 
+        # msg:
+          # - '{{ datos_vrf | to_nice_json}}'
+          
+    # - name: Parseo VRF FISICAS
+      # set_fact:
+        # datos_vrf_unica: "{{ datos_vrf_unica | default([]) + [ item ] }}"
+      # when: 
+        # - vrf is not failed
+      # with_items: 
+        # - "{{ datos_vrf | unique}}"
+    
+    
+    # - debug: 
+        # msg:
+          # - '{{ datos_vrf_unica | to_nice_json}}'    
+        
+          
+ ################################## PARSEO ETH TRUNK     ####################################### 
+          
+          
+    # - name: Parseo ETH TRUNK
+      # set_fact:
+        # datos_vrf_trunk: "{{ datos_vrf_trunk | default([]) + ['interface ' + item | regex_search('\\s+([E]\\w*\\-\\w*\\D\\d*)') | trim ] }}"
+      # delegate_to: localhost
+      # when: 
+        # - vrf is not failed
+        # - item | regex_search('\\s+([E]\\w*\\-\\w*\\D\\d*)') is not none
+      # with_items: "{{ vrf['stdout_lines'][0] | default ([]) + 
+                      # vrf['stdout_lines'][1] | default ([]) + 
+                      # vrf['stdout_lines'][2] | default ([]) +
+                      # vrf['stdout_lines'][3] | default ([]) +
+                      # vrf['stdout_lines'][4] | default ([]) +
+                      # vrf['stdout_lines'][5] | default ([]) +
+                      # vrf['stdout_lines'][6] | default ([]) +
+                      # vrf['stdout_lines'][7] | default ([]) +
+                      # vrf['stdout_lines'][8] | default ([]) +
+                      # vrf['stdout_lines'][9] | default ([]) +
+                      # vrf['stdout_lines'][10]| default ([]) +
+                      # vrf['stdout_lines'][11]| default ([]) 
+                    
+                    # }}"
+                    
+                    
+    # - name: SALIDA ETH TRUNK 
+      # debug:
+        # msg:
+          # - "{{ datos_vrf_trunk | to_nice_json }}"
+      # when:
+          # - " datos_vrf_trunk is defined"
+          
+          
+          
+    # - name: LISTAR INTERFACES VIRTUALES Eth-Trunk
+      # ce_command:
+        # commands:
+          # - 'display {{item}} | inc Giga'
+      # register: virtual
+      # retries: 2
+      # delay: 2
+      # until: virtual is not failed 
+      # with_items:
+        # - "{{datos_vrf_trunk | unique }}"
+      # when:
+        # - "datos_vrf_trunk is defined"
+        
+    # - name: SALIDA INTERFACES VIRTUALES Eth-Trunk
+      # debug: 
+        # msg:
+          # -  '{{ virtual | to_nice_json}}'
+
+
+    # - name: variable con output crudo
+      # set_fact:
+        # output_crudo: "{{output_crudo | default([]) + [ item['stdout_lines'][0]  ]  }}"
+      # delegate_to: localhost
+      # with_items:
+        # - "{{virtual['results']}}"
+      # when: 
+        # - "item['stdout_lines'][0]  is not none"
+        # - "datos_vrf_trunk is defined"        
+
+
+    # - name: variable con output crudo en forma de lista
+      # set_fact:
+        # output_compilado: "{{output_crudo | flatten  }}"
+      # delegate_to: localhost
+      # when: 
+        # - "datos_vrf_trunk is defined"
+        
+    # - name:  SALIDA SUB INTERFACES FISICAS ETH TRUNK
+      # debug: 
+        # msg:
+          # - '{{ output_compilado | to_nice_json}}'
+      # when: 
+          # - " output_compilado is defined "
+        
+   
+    # - name: Parseo INTERFACES VIRTUALES Eth-Trunk
+      # set_fact:
+        # datos_sub_eth_trunk: "{{ datos_sub_eth_trunk | default([]) + ['interface ' item | regex_search('([G][\\w\\/\\d]*)') | trim ] }}"
+      # when: 
+        # - "datos_vrf_trunk is defined"
+        # - item | regex_search('([G][\\w\\/\\d]*)') is not none
+      # with_items: "{{ output_compilado }}"
+    
+    
+    # - name:  SALIDA SUB INTERFACES FISICAS ETH TRUNK
+      # debug: 
+        # msg:
+          # - '{{ datos_sub_eth_trunk | to_nice_json}}'
+      # when: 
+          # - " datos_sub_eth_trunk is defined "
+
+    # - name: PAUSAR 10 segundos
+      # pause:
+        # seconds: 10
+      # tags:
+        # - configuration
+
+ ################################## PARSEO VLANIF    ####################################### 
+          
+          
+    # - name: Parseo VLANIF
+      # set_fact:
+        # datos_vlanif: "{{ datos_vlanif | default([]) + ['vlan ' + item | regex_search('\\s+Vlanif(\\d+)', '\\1') | first ] }}"
+      # delegate_to: localhost
+      # when: 
+        # - vrf is not failed
+        # - " item | regex_search('\\s+Vlanif(\\d+)') is not none "
+        
+      # with_items: "{{ vrf['stdout_lines'][0] | default ([]) + 
+                      # vrf['stdout_lines'][1] | default ([]) + 
+                      # vrf['stdout_lines'][2] | default ([]) +
+                      # vrf['stdout_lines'][3] | default ([]) +
+                      # vrf['stdout_lines'][4] | default ([]) +
+                      # vrf['stdout_lines'][5] | default ([]) +
+                      # vrf['stdout_lines'][6] | default ([]) +
+                      # vrf['stdout_lines'][7] | default ([]) +
+                      # vrf['stdout_lines'][8] | default ([]) +
+                      # vrf['stdout_lines'][9] | default ([]) +
+                      # vrf['stdout_lines'][10]| default ([]) +
+                      # vrf['stdout_lines'][11]| default ([]) 
+                    
+                    # }}"
+                    
+                    
+    # - name: SALIDA VLANIF
+      # debug:
+        # msg:
+          # - "{{ datos_vlanif | to_nice_json }}"
+      # when:
+          # - " datos_vlanif is defined"
+      
+
+      
+    # - name: LISTAR INTERFACES VLANs
+      # ce_command:
+        # commands:
+          # - 'display {{item}} verbose | begin Interface'
+          #- 'display {{item}} verbose'   #PARA V6
+      # register: vlan
+      # retries: 2
+      # delay: 2
+      # until: vlan is not failed 
+      # with_items:
+        # - "{{datos_vlanif}}"
+      # when:
+        # - "datos_vlanif is defined"
+        
+        
+        
+    # - name: SALIDA INTERFACES VLANs
+      # debug:
+        # msg:
+          # - "{{ vlan | to_nice_json }}"
+      # when:
+          # - " vlan is defined"
+
+
+    
+    # - name: variable con output crudo
+      # set_fact:
+        # output_crudo_vlanif: "{{output_crudo_vlanif | default([]) + [ item['stdout_lines'][0]  ]  }}"
+      # delegate_to: localhost
+      # with_items:
+        # - "{{vlan['results']}}"
+      # when: 
+        # - "item['stdout_lines'][0]  is not none"
+        # - "vlan is defined"        
+
+
+    # - name: variable con output crudo en forma de lista
+      # set_fact:
+        # output_compilado_vlanif: "{{output_crudo_vlanif | flatten  }}"
+      # delegate_to: localhost
+      # when: 
+        # - "vlan is defined"
+        
+    # - name:  SALIDA SUB INTERFACES FISICAS ETH TRUNK
+      # debug: 
+        # msg:
+          # - '{{ output_compilado_vlanif | to_nice_json}}'
+      # when: 
+          # - " output_compilado_vlanif is defined "
+        
+   
+   
+    # - name: Parseo INTERFACES VIRTUALES Eth-Trunk
+      # set_fact:
+        # datos_sub_eth_trunk: "{{ datos_sub_eth_trunk | default([]) + ['interface ' item | regex_search('([G][\\w\\/\\d]*)') | trim ] }}"
+      # when: 
+        # - "datos_vrf_trunk is defined"
+        # - item | regex_search('([G][\\w\\/\\d]*)') is not none
+      # with_items: "{{ output_compilado }}"
+    
+    
+    # - name:  SALIDA SUB INTERFACES FISICAS ETH TRUNK
+      # debug: 
+        # msg:
+          # - '{{ datos_sub_eth_trunk | to_nice_json}}'
+      # when: 
+          # - " datos_sub_eth_trunk is defined "
+
+    # - name: PAUSAR 10 segundos
+      # pause:
+        # seconds: 10
+      # tags:
+        # - configuration
+
+
+    
+    
+    
+          
+          
+    # - name: EXPORTAR SALIDA PREFIJOS
+      # lineinfile:
+        # dest: "/home/u623994/Ansible/Rhonald/{{inventory_hostname}}__VRF.csv" 
+        # line: "{{ item | join('\n')}}"
+    # # si no existe lo crea
+        # create: yes
+    # # permisos Lectura Escritura
+        # mode: '666'
+        # insertafter: EOF
+      # with_items: 
+        # - "{{ datos_vrf | unique}}"
+      # when: 
+          # - " datos_vrf is defined"
+        
+      
+   

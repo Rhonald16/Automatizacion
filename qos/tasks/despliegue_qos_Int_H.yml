@@ -1,0 +1,97 @@
+---
+# - name: MI PRIMER PLAYBOOK
+  # hosts: NORMALIZACION
+  # connection: network_cli
+  # gather_facts: no
+  # tasks:
+#--------------------------LISTAR TAREAS-----------------------------------------------------------------
+#ansible-playbook QoS_MOVIL.yml --list-task
+#ansible-playbook QoS_MOVIL.yml -v -e icd=7117165
+#--------------------------APLCAR PLAYBOOK---------------------------------------------------------------
+
+#ansible-playbook QoS_MOVIL.yml -v -e vpn=vpn-personal-iub-3G
+#ansible-playbook QoS_MOVIL.yml -v -e vpn=VPN-PERSONAL-ABIS-2G-BSC
+#ansible-playbook QoS_MOVIL.yml -v -e vpn=VPN-PERSONAL-IUB-3G-RNC
+#ansible-playbook QoS_MOVIL.yml -v -e vpn=vpn-mvs-RS-LTE-amba
+#ansible-playbook QoS_MOVIL.yml -v -e vpn=vpn-claro-RS-LTE-amba
+#ansible-playbook QoS_MOVIL.yml -v -e vpn=vpn-personal-iu
+#ansible-playbook QoS_MOVIL.yml -v -e vpn=vpn-personal-iur
+
+
+
+
+#######################################################################################33
+    - name: LISTAR SUB-INTERFACES MOVISTAR Y CLARO HUAWEI
+      ce_command:
+        commands:
+          - 'dis ip vpn-instance vpn-mvs-RS-LTE-amba interface'
+          - 'dis ip vpn-instance vpn-claro-RS-LTE-amba interface'
+          - 'dis curr configuration dsdomain RANSHARING_OPERADORES'
+      register: vrf
+      retries: 2
+      delay: 2
+      until: vrf is not failed 
+
+####################### DESPLIEGUE QoS VPNS MOVISTAR Y CLARO HUAWEI ##############################################################################          
+
+
+    # - name: LISTAR DIFFSERV RANSHARING_OPERADORES
+      # debug:
+        # msg: 
+    - name:  IMPACTO DIFFSERV RANSHARING_OPERADORES
+      ce_command:
+        commands:
+          - 'sys'
+          - 'diffserv domain RANSHARING_OPERADORES'
+          - '8021p-inbound 0 phb be green'
+          - '8021p-inbound 1 phb be green'
+          - '8021p-inbound 2 phb af2 green'
+          - '8021p-inbound 3 phb af2 green'
+          - '8021p-inbound 4 phb af2 green'
+          - '8021p-inbound 6 phb ef green'
+          - '8021p-inbound 7 phb ef green'
+          - 'ip-dscp-inbound 0 phb be green'
+          - 'ip-dscp-inbound 12 phb be green'
+          - 'ip-dscp-inbound 14 phb be green'
+          - 'ip-dscp-inbound 20 phb af2 green'
+          - 'ip-dscp-inbound 22 phb af2 green'
+          - 'ip-dscp-inbound 28 phb af2 green'
+          - 'ip-dscp-inbound 34 phb af2 green'
+          - 'ip-dscp-inbound 46 phb ef green'
+          - 'ip-dscp-inbound 48 phb ef green'
+          - 'ip-dscp-inbound 56 phb ef green'
+          - 'commit label ICD_{{icd}}'
+      register: operador
+      retries: 2
+      delay: 2
+      until: operador is not failed
+      when: 
+        - "'RANSHARING_OPERADORES' not in vrf['stdout'][2]"
+        - "'mvs' in vrf['stdout'][0] or 'claro' in vrf['stdout'][1]"
+
+####################### DESPLIEGUE QoS RNC HUAWEI ##############################################################################    
+ 
+
+    - name: CHEQUEAR SI EL ARCHIVO DE INTERFACES HUAWEI EXISTE
+      stat:
+        path: "./roles/QoS_MOVIL/output/huawei/{{inventory_hostname}}/INTERFACES_FISICAS.txt"
+      register: file_checker
+
+
+    # - name: LISTAR QoS HUAWEI INTERFACES
+      # debug:
+        # msg: 
+    - name:  IMPACTO QoS HUAWEI INTERFACES
+      ce_command:
+        commands:
+          - 'sys'
+          - "{{lookup('file', './roles/QoS_MOVIL/output/huawei/{{inventory_hostname}}/INTERFACES_FISICAS.txt', errors='ignore') }}"
+          - 'commit label ICD_{{icd}}'
+      register: interface
+      retries: 2
+      delay: 2
+      until: interface is not failed
+      when: 
+        - file_checker.stat.exists
+
+############################################################################################################

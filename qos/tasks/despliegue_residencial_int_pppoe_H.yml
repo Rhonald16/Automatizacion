@@ -1,0 +1,197 @@
+---
+# - name: APLICACION DE QOS FASE II EN INTERFACES RESIDENCIAL NODOS HUAWEI
+  # hosts: NORMALIZACION
+  # connection: network_cli
+  # gather_facts: no
+  # serial: 1
+  # tasks:
+  
+#--------------------------LISTAR TAREAS-----------------------------------------------------------------
+#ansible-playbook QoS_II.yml --list-task
+
+#--------------------------APLCAR PLAYBOOK---------------------------------------------------------------
+#ansible-playbook QoS_II.yml -v --tags="configuration"
+#ansible-playbook QoS_II.yml -v -e icd=11341879
+#--------------------------------------------------------------------------------------------------------
+
+
+####################### IMPACTO DE QoS EN INTERFACES PPPOE HUAWEI DESDE ARCHIVO CREADO ############################################################################3      
+
+    - name: CHEQUEAR SI EL ARCHIVO DE IMPACTO DE INTERFACES PPPOE HUAWEI EXISTE
+      stat:
+        path: "./roles/QoS_II/output/huawei/RESIDENCIAL/PPPOE/{{inventory_hostname}}_SUB_INTERFACES_PPPOE.txt"
+      register: file_checker
+      # tags:
+        # - configuration
+
+################################## ALMACENAR SESIONES ACTIVAS DE INTERFACES PPPOE PRE #################
+
+    # - name: Debug INTERFACES PPPOE HUAWEI desde archivo
+      # debug:
+        # msg: "{{item}}"        
+      # with_items:
+        # - "{{lookup('file', './roles/QoS_II/output/huawei/RESIDENCIAL/PPPOE/{{inventory_hostname}}_SUB_INTERFACES_PPPOE.txt', errors='ignore').splitlines() }}"
+      # when: 
+        # - file_checker.stat.exists
+        
+    - name:  LISTAR INTERFACES PPPOE HUAWEI PRE
+      ce_command:
+        commands:
+          - 'dis pppoe statistics {{item}}'
+      register: int_pppoe
+      retries: 2
+      delay: 2
+      until: int_pppoe is not failed
+      with_items:
+        - "{{lookup('file', './roles/QoS_II/output/huawei/RESIDENCIAL/PPPOE/{{inventory_hostname}}_SUB_INTERFACES_PPPOE.txt', errors='ignore').splitlines() }}"
+      when: 
+        - file_checker.stat.exists
+      # tags:
+        # - configuration
+        
+    # - name: Debug int_pppoe PRE
+      # debug:
+        # msg: "{{item['stdout_lines'][0][4] | regex_search('\\s+(ACTIVE_SESSION\\s+\\W\\s\\d+)\\s+', '\\1') | first}}"
+      # with_items:
+        # - "{{int_pppoe['results']}}"
+
+    - name: ARMADO DE LISTA SESIONES ACTIVAS PPPOE INTERFACES HUAWEI PRE
+      set_fact:
+        sesiones_activas_pppoe_pre: "{{sesiones_activas_pppoe_pre | default([]) + [item['stdout_lines'][0][4] | regex_search('\\s+(ACTIVE_SESSION\\s+\\W\\s\\d+)\\s+', '\\1') | first]}}"
+      delegate_to: localhost
+      with_items:
+        - "{{int_pppoe['results']}}"       
+
+    - name: Debug sesiones_activas_pppoe_pre
+      debug:
+        msg: 
+          - "{{item[0]}}"
+          - "{{item[1]}}"
+      with_together:
+        - "{{lookup('file', './roles/QoS_II/output/huawei/RESIDENCIAL/PPPOE/{{inventory_hostname}}_SUB_INTERFACES_PPPOE.txt', errors='ignore').splitlines() }}"
+        - "{{sesiones_activas_pppoe_pre}}"
+      when: 
+        - file_checker.stat.exists
+
+    - name: PAUSAR 10 segundos
+      pause:
+        seconds: 10 
+      
+######################################### ARMDO DE LISTA PARA IMPACTAR EN NODO HUAWEI #################
+
+    - name: variable undo trust
+      set_fact:
+        undo_trust: "{{'\nundo trust upstream\nundo trust 8021p\nundo shutdown'}}"
+      delegate_to: localhost
+
+    # - name: debug LISTA INTERFACES PPPOE SHUT HUAWEI
+      # debug:
+        # msg: 
+          # - "{{item + '\nshutdown'}}"
+          # - "{{item + undo_trust}}"
+      # with_items:
+        # - "{{lookup('file', './roles/QoS_II/output/huawei/RESIDENCIAL/PPPOE/{{inventory_hostname}}_SUB_INTERFACES_PPPOE.txt', errors='ignore').splitlines() }}"
+      # when: 
+        # - file_checker.stat.exists
+
+    - name: EXPORTAR SALIDA SUB-INTERFACES PPPOE SHUT HUAWEI 
+      lineinfile:
+        dest: "./roles/QoS_II/output/huawei/RESIDENCIAL/PPPOE/{{inventory_hostname}}_SUB_INTERFACES_PPPOE_SHUT.txt"
+        line: "{{item + '\nshutdown'}}"
+    # si no existe lo crea
+        create: yes
+    # permisos Lectura Escritura
+        mode: '666'
+        insertafter: EOF
+      with_items:
+        - "{{lookup('file', './roles/QoS_II/output/huawei/RESIDENCIAL/PPPOE/{{inventory_hostname}}_SUB_INTERFACES_PPPOE.txt', errors='ignore').splitlines() }}"
+      when: 
+        - file_checker.stat.exists     
+
+    - name: EXPORTAR SALIDA SUB-INTERFACES PPPOE A DESPLEGAR Y ACTIVAR HUAWEI 
+      lineinfile:
+        dest: "./roles/QoS_II/output/huawei/RESIDENCIAL/PPPOE/{{inventory_hostname}}_SUB_INTERFACES_PPPOE_ACTIVE.txt"
+        line: "{{item + undo_trust}}"
+    # si no existe lo crea
+        create: yes
+    # permisos Lectura Escritura
+        mode: '666'
+        insertafter: EOF
+      with_items:
+        - "{{lookup('file', './roles/QoS_II/output/huawei/RESIDENCIAL/PPPOE/{{inventory_hostname}}_SUB_INTERFACES_PPPOE.txt', errors='ignore').splitlines() }}"
+      when: 
+        - file_checker.stat.exists
+
+    - name:  IMPACTO SALIDA SUB-INTERFACES PPPOE HUAWEI
+      ce_command:
+        commands:
+          - 'sys'
+          - "{{lookup('file', './roles/QoS_II/output/huawei/RESIDENCIAL/PPPOE/{{inventory_hostname}}_SUB_INTERFACES_PPPOE_SHUT.txt', errors='ignore') }}"
+          - 'commit'
+          - "{{lookup('file', './roles/QoS_II/output/huawei/RESIDENCIAL/PPPOE/{{inventory_hostname}}_SUB_INTERFACES_PPPOE_ACTIVE.txt', errors='ignore') }}"
+          - 'commit label ICD_{{icd}}'
+      register: impacto_subinterfaces
+      retries: 2
+      delay: 2
+      until: impacto_subinterfaces is not failed
+      when: 
+        - file_checker.stat.exists
+
+
+    - name: PAUSAR 30 segundos
+      pause:
+        seconds: 30 
+
+################################## ALMACENAR SESIONES ACTIVAS DE INTERFACES PPPOE POST #################
+
+        
+    - name:  LISTAR INTERFACES PPPOE HUAWEI POST
+      ce_command:
+        commands:
+          - 'dis pppoe statistics {{item}}'
+      register: int_pppoe_post
+      retries: 2
+      delay: 2
+      until: int_pppoe_post is not failed
+      with_items:
+        - "{{lookup('file', './roles/QoS_II/output/huawei/RESIDENCIAL/PPPOE/{{inventory_hostname}}_SUB_INTERFACES_PPPOE.txt', errors='ignore').splitlines() }}"
+      when: 
+        - file_checker.stat.exists
+
+        
+    # - name: Debug int_pppoe PRE
+      # debug:
+        # msg: "{{item['stdout_lines'][0][4] | regex_search('\\s+(ACTIVE_SESSION\\s+\\W\\s\\d+)\\s+', '\\1') | first}}"
+      # with_items:
+        # - "{{int_pppoe['results']}}"
+
+    - name: ARMADO DE LISTA SESIONES ACTIVAS PPPOE INTERFACES HUAWEI POST
+      set_fact:
+        sesiones_activas_pppoe_post: "{{sesiones_activas_pppoe_post | default([]) + [item['stdout_lines'][0][4] | regex_search('\\s+(ACTIVE_SESSION\\s+\\W\\s\\d+)\\s+', '\\1') | first]}}"
+      delegate_to: localhost
+      with_items:
+        - "{{int_pppoe_post['results']}}"   
+        
+        
+    # - name: Debug sesiones_activas_pppoe_post
+      # debug:
+        # msg:
+          # - "{{item[0]}}"
+          # - "{{item[1]}}"
+      # with_together:
+        # - "{{lookup('file', './roles/QoS_II/output/huawei/RESIDENCIAL/PPPOE/{{inventory_hostname}}_SUB_INTERFACES_PPPOE.txt', errors='ignore').splitlines() }}"
+        # - "{{sesiones_activas_pppoe_post}}"
+      # when: 
+        # - file_checker.stat.exists
+        
+    - name: Validar SI LAS SESIONES DE LAS INTERFACES SON IGUALES PRE Y POST
+      assert:
+        that:
+          - "{{item[0] == item[0]}}"
+          - "{{item[1] == item[2]}}"
+        fail_msg: "fail. ACTIVE_SESSION"
+        success_msg: "ok. ACTIVE_SESSION"
+      with_together:
+        - "{{lookup('file', './roles/QoS_II/output/huawei/RESIDENCIAL/PPPOE/{{inventory_hostname}}_SUB_INTERFACES_PPPOE.txt', errors='ignore').splitlines() }}"
+        - "{{sesiones_activas_pppoe_pre}}"
+        - "{{sesiones_activas_pppoe_post}}"

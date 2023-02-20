@@ -1,0 +1,84 @@
+---
+# - name: APLICACION DE QOS FASE II EN INTERFACES RESIDENCIAL NODOS HUAWEI
+  # hosts: NORMALIZACION
+  # connection: network_cli
+  # gather_facts: no
+  # serial: 1
+  # tasks:
+  
+#--------------------------LISTAR TAREAS-----------------------------------------------------------------
+#ansible-playbook QoS_II.yml --list-task
+
+#--------------------------APLCAR PLAYBOOK---------------------------------------------------------------
+#ansible-playbook QoS_II.yml -v --tags="configuration"
+#ansible-playbook QoS_II.yml -v -e icd=11668854
+#--------------------------------------------------------------------------------------------------------
+
+
+####################### IMPACTO DE QoS EN INTERFACES HUAWEI DESDE ARCHIVO CREADO ############################################################################3      
+
+    - name: CHEQUEAR SI EL ARCHIVO DE IMPACTO DE INTERFACES FISICAS RESIDENCIAL HUAWEI EXISTE
+      stat:
+        path: "./roles/QoS_II/output/huawei/RESIDENCIAL/{{inventory_hostname}}_INTERFACES_FISICAS.txt"
+      register: file_checker
+      # tags:
+        # - configuration
+        
+    - name: CHEQUEAR SI EL ARCHIVO DE IMPACTO DE SUB-INTERFACES RESIDENCIAL HUAWEI EXISTE
+      stat:
+        path: "./roles/QoS_II/output/huawei/RESIDENCIAL/{{inventory_hostname}}_SUB_INTERFACES.txt"
+      register: file_checker_2
+      # tags:
+        # - configuration
+
+
+
+    - name: MOSTRAR ARCHIVO DE DESPLIEGUE INTERFACES Y SUB-INTERFACES RESIDENCIAL HUAWEI
+      debug:
+        msg:
+          - "{{ '!' if (not file_checker.stat.exists) else lookup('file', './roles/QoS_II/output/huawei/RESIDENCIAL/{{inventory_hostname}}_INTERFACES_FISICAS.txt', errors='ignore') }}"
+          - "{{ '!' if (not file_checker.stat.exists) else lookup('file', './roles/QoS_II/output/huawei/RESIDENCIAL/{{inventory_hostname}}_SUB_INTERFACES.txt', errors='ignore') }}"
+      # tags:
+        # - configuration
+        
+
+    # - name: LISTAR IMPACTO QoS HUAWEI INTERFACES FISICAS
+      # debug:
+        # msg: 
+    - name:  IMPACTO QoS RESIDENCIAL HUAWEI INTERFACES FISICAS
+      ce_command:
+        commands:
+          - 'sys'
+          - "{{ '!' if (not file_checker.stat.exists) else lookup('file', './roles/QoS_II/output/huawei/RESIDENCIAL/{{inventory_hostname}}_INTERFACES_FISICAS.txt', errors='ignore') }}"
+          - "{{ '!' if (not file_checker.stat.exists) else lookup('file', './roles/QoS_II/output/huawei/RESIDENCIAL/{{inventory_hostname}}_SUB_INTERFACES.txt', errors='ignore') }}"
+          - 'commit label ICD_{{icd}}'
+      register: impacto_interfaces_qos
+      retries: 2
+      delay: 2
+      until: impacto_interfaces_qos is not failed
+      when: 
+        - file_checker.stat.exists
+      # tags:
+        # - configuration
+        
+    # - name: LISTAR IMPACTO QoS HUAWEI SUB-INTERFACES
+      # debug:
+        # msg: 
+    # - name:  IMPACTO QoS HUAWEI SUB-INTERFACES
+      # ce_command:
+        # commands:
+          # - 'sys'
+          # - "{{lookup('file', './roles/QoS_II/output/huawei/RESIDENCIAL/{{inventory_hostname}}_SUB_INTERFACES.txt', errors='ignore') }}"
+          # - 'commit label ICD2_{{icd}}'
+          # - 'commit'
+      # register: impacto_subinterfaces_qos
+      # retries: 2
+      # delay: 2
+      # until: impacto_subinterfaces_qos is not failed
+      # when: 
+        # - file_checker_2.stat.exists
+      # tags:
+        # - configuration
+
+
+

@@ -1,0 +1,188 @@
+---
+# - name: MI PRIMER PLAYBOOK
+  # hosts: NORMALIZACION
+  # connection: network_cli
+  # gather_facts: no
+  # tasks:
+#--------------------------LISTAR TAREAS-----------------------------------------------------------------
+# ansible-playbook QoS_MOVIL.yml --list-task
+# ansible-playbook QoS_MOVIL.yml -v -e vpn=mvs     solo movistar y claro
+# ansible-playbook QoS_MOVIL.yml -v -e vpn=personal para todas las demas
+
+#--------------------------APLCAR PLAYBOOK---------------------------------------------------------------
+
+# vpn=vpn-personal-s1
+# vpn=vpn-personal-S1MME
+# vpn=vpn-personal-gomran
+# vpn=vpn-personal-abis-2G
+# vpn=vpn-personal-iub-3G
+# vpn=VPN-PERSONAL-ABIS-2G-BSC
+# vpn=VPN-PERSONAL-IUB-3G-RNC
+# vpn-personal-iu
+# vpn-personal-iur
+
+# vpn-mvs-RS-LTE-amba
+# vpn-claro-RS-LTE-amba
+
+#--------------------------------------------------------------------------------------------------------
+
+
+    # - name: CHEQUEAR SI EL ARCHIVO DE INTERFACES HUAWEI EXISTE 1
+      # stat:
+        # path: './roles/QoS_MOVIL/output/huawei/{{inventory_hostname}}'
+      # register: file_checker2
+
+
+    # - name: CREAR CARPETA POR NODO 
+      # delegate_to: localhost 
+      # file: 
+        # path: "./roles/QoS_MOVIL/output/huawei/{{inventory_hostname}}" 
+        # state: directory
+      # when: not file_checker2.stat.exists
+
+ #----------------LISTAR INTERFACES CON VRF vpn-personal-iub-3G---------------
+
+    - name: LISTAR SUB-INTERFACES HUAWEI TODAS LAS VRFs
+      ce_command:
+        commands:
+          - 'dis ip vpn-instance vpn-personal-gomran interface'
+          - 'dis ip vpn-instance vpn-personal-abis-2G interface'
+          - 'dis ip vpn-instance vpn-personal-iub-3G interface'
+          - 'dis ip vpn-instance vpn-personal-S1MME interface'
+          - 'dis ip vpn-instance vpn-personal-s1 interface'
+          - 'dis ip vpn-instance VPN-PERSONAL-ABIS-2G-BSC interface'
+          - 'dis ip vpn-instance VPN-PERSONAL-IUB-3G-RNC interface'
+          - 'dis ip vpn-instance vpn-personal-iu interface'
+          - 'dis ip vpn-instance vpn-personal-iur interface'
+      register: vrf
+      retries: 2
+      delay: 2
+      until: vrf is not failed  
+      # when:
+        # - " vpn == 'personal' "
+
+
+    # - name: LISTAR SUB-INTERFACES MOVISTAR Y CLARO HUAWEI
+      # ce_command:
+        # commands:
+          # - 'dis ip vpn-instance vpn-mvs-RS-LTE-amba interface'
+          # - 'dis ip vpn-instance vpn-claro-RS-LTE-amba interface'
+      # register: vrf
+      # retries: 2
+      # delay: 2
+      # until: vrf is not failed 
+      # when:
+        # - " vpn == 'mvs' "
+      
+############################# EXTRAE SUB-INTERFACES DISTINTAS VPNs ##################################################### 
+
+    - name: variable trust
+      set_fact:
+        trust: "{{'\ntrust upstream TECO-QoS-Classifier\ntrust 8021p'}}"
+      delegate_to: localhost
+
+
+
+    - name: ALMACENAR SUB-INTERFACES MOVIL GIGA Y ETH-TRUNK HUAWEI POR VRF
+      set_fact:
+        sub_interface_movil: "{{ sub_interface_movil | default([]) + [ 'interface ' + item | regex_search('\\s+([G|E]\\w*[\\-\\/\\d\\w]*\\.{1}\\d*)', '\\1') | first ] }}"
+      delegate_to: localhost
+      with_items:
+        - "{{vrf['stdout_lines'][0] | default([]) + vrf['stdout_lines'][1] | default([]) + vrf['stdout_lines'][2] | default([]) + vrf['stdout_lines'][3] | default([])
+             + vrf['stdout_lines'][4] | default([]) + vrf['stdout_lines'][5] | default([]) + vrf['stdout_lines'][6] | default([]) + vrf['stdout_lines'][7] | default([])
+             + vrf['stdout_lines'][8] | default([])}}"
+      when: 
+        - "item | regex_search('\\s+([G|E]\\w*[\\-\\/\\d\\w]*\\.{1}\\d*)') is not none"
+
+
+    - name: ALMACENAR CANTIDAD DE SUB-INTERFACES MOVIL A DESPLEGAR
+      set_fact: 
+        total_sub_interface_movil: "{{ '0' if (sub_interface_movil is undefined) else sub_interface_movil | count }}"
+      delegate_to: localhost
+
+      
+########################### ESCRITURA SUB-INTERFACES FISICAS Y VIRTUALES #####################################################
+ 
+    - name: EXPORTAR SALIDA SUB-INTERFACES MOVIL A DESPLEGAR HUAWEI
+      lineinfile:
+        dest: "./roles/QoS_II/output/huawei/MOVIL/{{inventory_hostname}}_SUB_INTERFACESINTERFACES_MOVIL.txt" 
+        line: "{{ item + trust }}"
+    # si no existe lo crea
+        create: yes
+    # permisos Lectura Escritura
+        mode: '666'
+        insertafter: EOF
+      with_items:
+        - "{{ sub_interface_movil | default([]) }}"
+      when: 
+        - "sub_interface_movil is defined"
+
+    - name: CANTIDAD DE SUB-INTERFACES MOVIL HUAWEI
+      debug:
+        msg: 
+          - "el nodo {{ inventory_hostname }} tiene un total de {{total_sub_interface_movil}} interfaces fisicas"
+
+####################### DESPLIEGUE QoS VPNS MOVISTAR Y CLARO HUAWEI ##############################################################################          
+
+
+    # - name: LISTAR DIFFSERV RANSHARING_OPERADORES
+      # debug:
+        # msg: 
+    # - name:  IMPACTO DIFFSERV RANSHARING_OPERADORES
+      # ce_command:
+        # commands:
+          # - 'sys'
+          # - 'diffserv domain RANSHARING_OPERADORES'
+          # - '8021p-inbound 0 phb be green'
+          # - '8021p-inbound 1 phb be green'
+          # - '8021p-inbound 2 phb af2 green'
+          # - '8021p-inbound 3 phb af2 green'
+          # - '8021p-inbound 4 phb af2 green'
+          # - '8021p-inbound 6 phb ef green'
+          # - '8021p-inbound 7 phb ef green'
+          # - 'ip-dscp-inbound 0 phb be green'
+          # - 'ip-dscp-inbound 12 phb be green'
+          # - 'ip-dscp-inbound 14 phb be green'
+          # - 'ip-dscp-inbound 20 phb af2 green'
+          # - 'ip-dscp-inbound 22 phb af2 green'
+          # - 'ip-dscp-inbound 28 phb af2 green'
+          # - 'ip-dscp-inbound 34 phb af2 green'
+          # - 'ip-dscp-inbound 46 phb ef green'
+          # - 'ip-dscp-inbound 48 phb ef green'
+          # - 'ip-dscp-inbound 56 phb ef green'
+          # - 'commit'
+      # register: operador
+      # retries: 2
+      # delay: 2
+      # until: operador is not failed
+      # when: 
+        # - " vpn == 'mvs' "
+        # - "'mvs' in vrf['stdout'][0] or 'claro' in vrf['stdout'][1]"
+
+####################### DESPLIEGUE QoS VPNS PERSONAL y MOVISTAR-CLARO HUAWEI ############################################################################## 
+
+    # - name: CHEQUEAR SI EL ARCHIVO DE INTERFACES HUAWEI EXISTE 2
+      # stat:
+        # path: "./roles/QoS_MOVIL/output/huawei/{{inventory_hostname}}/SUB_INTERFACES_{{vpn}}.txt"
+      # register: file_checker
+
+
+    # - name: LISTAR QoS HUAWEI SUB-INTERFACES
+      # debug:
+        # msg: 
+    # - name:  IMPACTO QoS HUAWEI SUB-INTERFACES
+      # ce_command:
+        # commands:
+          # - 'sys'
+          # - "{{lookup('file', './roles/QoS_MOVIL/output/huawei/{{inventory_hostname}}/SUB_INTERFACES_{{vpn}}.txt', errors='ignore') }}"
+          # - 'commit'
+      # register: interface
+      # retries: 2
+      # delay: 2
+      # until: interface is not failed
+      # when: 
+        # - file_checker.stat.exists
+        
+   
+
+################################################################################################################################

@@ -1,0 +1,152 @@
+---
+- name: seguimiento volcado interfaces vpn personal NGN
+  hosts: NORMALIZACION
+  connection: network_cli
+  gather_facts: false
+  serial: 1
+  tasks:      
+    - name: Leer CSV 
+      read_csv:
+        path: "/home/u623994/Ansible/Rhonald/datos1.csv"
+        fieldnames: nodo_a,ip_wan,ip_loop
+        delimiter: ';'
+      register: comunidades
+      delegate_to: localhost
+        
+    - name: filtrar nodos CISCO
+      set_fact:
+        nodos_filtrados: "{{nodos_filtrados | default([]) + [ item.nodo_a ] }}"
+      with_items:
+        - "{{comunidades.list}}"
+
+    - name: DEBUG nodo
+      debug:
+        msg: 
+            - "{{ nodos_filtrados }}"      
+
+    - name: LISTAR comando comunidades 
+      iosxr_command:
+        commands:
+          # - 'show running-config router bgp {{item.com_as}} neighbor {{}}'
+            - 'show bgp {{item.ip_wan}} | begin {{item.ip_loop}}' 
+            # - 'show bgp {{item.ip_wan}} '          
+      register: consulta_comunidades
+      retries: 2
+      delay: 2
+      until: consulta_comunidades is not failed
+      with_items: "{{ comunidades.list }}"
+
+    - name: DEBUG comunidades consultada
+      debug:
+        msg: 
+            - "{{ consulta_comunidades | to_nice_json }}"
+            # - "{{ consulta_comunidades.list | type_debug }}"
+
+    # - name: DEBUG comunidades 1
+      # debug:
+        # msg: 
+            # - "{{item['stdout_lines'][0][2]}}"
+      # with_items:
+        # - "{{ consulta_comunidades['results'] }}"
+
+    # - name: leer json IPV4
+    #   set_fact:
+    #     bgp_community: "{{ consulta_comunidades |  json_query('results[].stdout_lines[][2]') }}"
+    #   with_items: "{{ comunidades.list }}"
+
+    # - name: leer json
+      # set_fact:
+        # existe_comunidad: "{{ existe_comunidad | default([]) +  [ item['stdout_lines'][0][2] if('Community' in item['stdout'][0]) else 'no_existe']}}"
+      # delegate_to: localhost
+      # with_items:
+        # - "{{ consulta_comunidades['results'] }}"
+  
+    # - name: DEBUG comunidades 1
+    #   debug:
+    #     msg: 
+    #         - "{{ existe_comunidad }}"
+    #         - "{{ nodos_filtrados }}"
+
+    # - name: Parseo comunidades
+      # set_fact:
+        # comm: "{{ comm | default([]) + [ 'no_existe' if ('no_existe' in item) else item | regex_findall('7303:5\\d*') ] }}"
+      # # when:
+        # # - item | regex_search('(7303:5.*)') is not none
+      # with_items:
+        # - "{{ existe_comunidad }}"
+
+    # - name: DEBUG comm
+      # debug:
+        # msg: 
+            # - "{{ comm }}"
+
+
+    # - name: file output
+      # connection: local
+      # lineinfile:
+          # path: "/home/u623994/Ansible/Rhonald/reporte_community_prueba.csv"
+          # line: "{{ item }}"   
+          # create: yes
+          # mode: '666'
+          # insertafter: EOF
+      # with_together: 
+      # - "{{ nodos_filtrados }}"
+      # - "{{ comm }}"
+
+    # # # # - name: "Adding"
+    # # #   blockinfile:
+    # #     name: /home/u623994/Ansible/victor/roles/comunidade/output/{{inventory_hostname}}_community.txt 
+    # #     insertbefore: 'endif'
+    # #     block: |2 
+    # #           set community comm_Ctral_Hub additive
+    # #           set community comm_Dupla_OC additive
+    # #           set community comm_PE additive
+    # #           set community comm_Pais additive
+    # #           set community comm_Pcia additive
+    # #     marker: "" 
+
+    # - name: "Adding cosas"
+    #   lineinfile:
+    #     path: /home/u623994/Ansible/victor/roles/comunidade/output/{{inventory_hostname}}_community.txt 
+    #     insertbefore: 'endif' 
+    #     line: "{{ item }}"
+    #   with_items:
+    #      - '    set community comm_Ctral_Hub additive'
+    #      - '    set community comm_Dupla_OC additive'
+    #      - '    set community comm_PE additive'            
+    #      - '    set community comm_Pais additive'     
+    #      - '    set community comm_Pcia additive'     
+
+    # - name: impactar equipo
+    #   # debug:
+    #   #   msg:
+    #   iosxr_command:
+    #     commands:
+    #       - 'configure terminal'
+    #       - 'community-set comm_Pais'
+    #       - '{{ item.com_Pais }}'
+    #       - 'end-set'
+    #       - '!'
+    #       - 'community-set comm_PE'
+    #       - '{{ item.com_pe }}'
+    #       - 'end-set'
+    #       - '!'
+    #       - 'community-set comm_Pcia'
+    #       - '{{ item.com_provincia }}'
+    #       - 'end-set'
+    #       - '!'
+    #       - 'community-set comm_Dupla_OC'
+    #       - '{{ item.com_dupla }}'
+    #       - 'end-set'
+    #       - '!'
+    #       - 'community-set comm_Ctral_Hub'
+    #       - '{{ item.com_sitio }}'
+    #       - 'end-set'
+    #       - '!'
+    #       - "{{lookup('file', '/home/u623994/Ansible/victor/roles/comunidade/output/{{inventory_hostname}}_community.txt', errors='ignore') }}"
+    #       - 'commit label ICD_9501103'
+    #   retries: 2
+    #   delay: 2
+    #   until: consulta_comunidades is not failed
+    #   with_items: "{{ nodos_filtrados }}"
+

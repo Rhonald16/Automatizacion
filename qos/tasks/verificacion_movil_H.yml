@@ -1,0 +1,820 @@
+---
+# - name: MI PRIMER PLAYBOOK
+  # hosts: NORMALIZACION
+  # connection: network_cli
+  # gather_facts: no
+  # tasks:
+#--------------------------LISTAR TAREAS-----------------------------------------------------------------
+
+#--------------------------APLCAR PLAYBOOK---------------------------------------------------------------
+
+# ansible-playbook QoS_II.yml -v --tags="configuration"
+# ansible-playbook QoS_II.yml -v --tags="subinterfaces"
+
+############################ CHEQUEAR SI ARCHIVO EXITE ###############
+
+
+    - name: CHEQUEAR SI EL ARCHIVO DE IMPACTO DE INTERFACES FISICAS HUAWEI EXISTE
+      stat:
+        path: "./roles/QoS_II/output/huawei/MOVIL/{{inventory_hostname}}/interfaces_FISICAS_MOVIL.txt"
+      register: file_checker_2
+
+
+    - name: Validar SI EL ARCHIVO DE CONFIGURACION INTERFACES FISICAS EXISTE PREVIAMENTE
+      assert:
+        that:
+          - not file_checker_2.stat.exists
+        fail_msg: "fail. Archivo de configuracion de interfaces fisicas del nodo {{inventory_hostname}} existe"
+        success_msg: "ok. Nodo {{inventory_hostname}} para crear archivo de interfaces fisicas"
+
+ #----------------LISTAR INTERFACES CON VRF vpn-personal-iub-3G---------------
+  
+ 
+    - name: LISTAR INTERFACES HUAWEI TODAS LAS VRFs
+      ce_command:
+        commands:
+          - 'dis ip vpn-instance vpn-personal-gomran interface'
+          - 'dis ip vpn-instance vpn-personal-abis-2G interface'
+          - 'dis ip vpn-instance vpn-personal-iub-3G interface'
+          - 'dis ip vpn-instance vpn-personal-S1MME interface'
+          - 'dis ip vpn-instance vpn-personal-s1 interface'
+          - 'dis ip vpn-instance VPN-PERSONAL-IUB-3G-RNC interface'
+          - 'dis ip vpn-instance VPN-PERSONAL-ABIS-2G-BSC interface'
+          - 'dis ip vpn-instance vpn-mvs-RS-LTE-amba interface'
+          - 'dis ip vpn-instance vpn-claro-RS-LTE-amba interface'
+          - 'dis ip vpn-instance vpn-personal-iu interface'
+          - 'dis ip vpn-instance vpn-personal-iur interface'
+          - 'dis ip vpn-instance vpn-personal-voz interface'
+      register: vrf
+      retries: 2
+      delay: 2
+      until: vrf is not failed  
+      tags:
+        - configuration
+        # - subinterfaces
+
+
+    # - name: PAUSAR 10 segundos
+      # pause:
+        # seconds: 10
+      # tags:
+        # - configuration
+################################ interfaces vpn-personal-voz ################################################
+
+
+    # - name: LISTAR INTERFACES POR VRF vpn-personal-voz
+      # debug:
+        # msg: "{{item | regex_search('\\s+([G|E]\\w+[\\-\\/\\d\\w]*\\.{1}\\d*)|\\s+(Vlanif\\d+)\\.*') | trim}}" 
+      # with_items:
+        # - "{{vrf['stdout_lines'][11]}}"
+      # when:
+        # - "item | regex_search('\\s+([G|E]\\w+[\\-\\/\\d\\w]*\\.{1}\\d*)|\\s+(Vlanif\\d+)\\.*') is not none"
+      # tags:
+        # - configuration
+        
+    - name: ALMACENAR INTERFACES POR VRF vpn-personal-voz
+      set_fact:
+        int_vpn_voz: "{{ int_vpn_voz | default([]) + [ item | regex_search('\\s+([G|E]\\w+[\\-\\/\\d\\w]*\\.{1}\\d*)|\\s+(Vlanif\\d+)\\.*') | trim ] }}"
+      delegate_to: localhost
+      with_items:
+        - "{{vrf['stdout_lines'][11]}}"
+      when:
+        - "item | regex_search('\\s+([G|E]\\w+[\\-\\/\\d\\w]*\\.{1}\\d*)|\\s+(Vlanif\\d+)\\.*') is not none"
+      tags:
+        - configuration
+
+
+    - name: LISTAR int_vpn_voz
+      debug:
+        msg: "{{item | regex_replace('Vlanif' ,'vlan ')}}" 
+      with_items:
+        - "{{int_vpn_voz}}"
+      tags:
+        - configuration
+        
+    - name: LISTAR INTERFACES vpn-personal-voz
+      ce_command:
+        commands:
+          - "dis int description {{item | regex_replace('Vlanif' ,'vlan ')}}"
+      register: personal_voz_int
+      retries: 2
+      delay: 2
+      until: personal_voz_int is not failed 
+      with_items:
+        - "{{int_vpn_voz}}"
+      when:
+        - "int_vpn_voz is defined"
+      # tags:
+        # - configuration
+
+    - name: ALMACENAR INTERFACES vpn-personal-voz UNIFICADA HUAWEI 3G - RNC - BSC 
+      set_fact:
+        int_vpn_voz_unificada: "{{int_vpn_voz_unificada | default([]) + [' ' + item[0]] }}"
+      delegate_to: localhost
+      with_together:
+        - "{{int_vpn_voz}}"
+        - "{{personal_voz_int['results']}}"
+      when:
+        - "int_vpn_voz is defined"
+        - "'RNC' in item[1]['stdout'][0] or 'BSC' in item[1]['stdout'][0]"
+      # tags:
+        # - configuration
+
+    # - name: LISTAR int_vpn_voz_unificada
+      # debug:
+        # msg: "{{int_vpn_voz_unificada}}" 
+      # tags:
+        # - configuration
+        
+################################ VARIABLES TRUST PARA INTERFACES A IMPACTAR  ########################################################
+
+    - name: variable trust
+      set_fact:
+        trust: "{{'\ntrust upstream TECO-QoS-Classifier\ntrust 8021p'}}"
+      delegate_to: localhost     
+
+    - name: variable port_queue
+      set_fact:
+        port_queue:  "{{'\nport-queue be wfq weight 30 outbound
+                         \nport-queue af1 wfq weight 5 outbound 
+                         \nport-queue af2 wfq weight 10 outbound
+                         \nport-queue af3 wfq weight 10 outbound
+                         \nport-queue af4 wfq weight 20 outbound
+                         \nport-queue ef pq shaping shaping-percentage 20 outbound
+                         \nport-queue cs6 wfq weight 5 outbound'}}"
+      # tags:
+        # - configuration   
+        
+############################# EXTRAE INTERFACES FISICAS ##################################################### 
+ 
+    # - name: LISTAR INTERFACES POR VRF
+      # debug:
+        # msg: 
+          # - "{{'interface ' + item | regex_search('\\s+([G]\\w*[\\-\\/\\d\\w]*)\\.*\\d*', '\\1') | first}}" 
+      # with_items:
+        # - "{{vrf['stdout_lines'][0] | default([]) + vrf['stdout_lines'][1] | default([]) + vrf['stdout_lines'][2] | default([]) + vrf['stdout_lines'][3] | default([])
+             # + vrf['stdout_lines'][4] | default([]) + vrf['stdout_lines'][5] | default([]) + vrf['stdout_lines'][6] | default([])}}"
+      # when:
+        # - "item | regex_search('\\s+([G]\\w*[\\-\\/\\d\\w]*)\\.*\\d*') is not none"
+
+        
+
+    - name: ALMACENAR INTERFACES FISICAS GIGA HUAWEI POR VRF
+      set_fact:
+        interface_fisica: "{{ interface_fisica | default([]) + [ 'interface ' + item | regex_search('\\s+([G]\\w*[\\-\\/\\d\\w]*)\\.*\\d*', '\\1') | first ] }}"
+      delegate_to: localhost
+      with_items:
+        - "{{vrf['stdout_lines'][0] | default([]) + vrf['stdout_lines'][1] | default([]) + vrf['stdout_lines'][2] | default([]) + vrf['stdout_lines'][3] | default([])
+             + vrf['stdout_lines'][4] | default([]) + vrf['stdout_lines'][5] | default([]) + vrf['stdout_lines'][6] | default([]) + vrf['stdout_lines'][7] | default([])
+             + vrf['stdout_lines'][8] | default([]) + vrf['stdout_lines'][9] | default([]) + vrf['stdout_lines'][10] | default([]) + int_vpn_voz_unificada | default([])}}"
+      when: 
+        - "item | regex_search('\\s+([G]\\w*[\\-\\/\\d\\w]*)\\.*\\d*') is not none"
+      # tags:
+        # - configuration
+
+    - name: COMPILAR INTERFACES FISICAS GIGA HUAWEI POR VRF
+      set_fact:
+        interface_fisica_unicas:  "{{ interface_fisica_unicas | default([]) + [ item ]}}"
+      delegate_to: localhost
+      with_items:
+        - "{{ interface_fisica  | unique  }}"
+      when: 
+        - "interface_fisica is defined"
+      # tags:
+        # - configuration
+        
+    # - name: LISTAR interface_fisica_unicas
+      # debug:
+        # msg: "{{interface_fisica_unicas}}"
+      # tags:
+        # - configuration
+        
+    # - name: PAUSAR 10 segundos
+      # pause:
+        # seconds: 10
+        
+############################# EXTRAE INTERFACES Eth-Trunk #####################################################
+
+    
+    - name: LISTAR INTERFACES Eth-Trunk HUAWEI 3G - RNC - BSC
+      set_fact:
+        interface_virtual: "{{interface_virtual | default([]) + ['interface ' + item | regex_search('\\s+([E]\\w*[\\-\\/\\d\\w]*)\\.*\\d*', '\\1') | first] }}"
+      delegate_to: localhost
+      with_items:
+        - "{{vrf['stdout_lines'][0] | default([]) + vrf['stdout_lines'][1] | default([]) + vrf['stdout_lines'][2] | default([]) + vrf['stdout_lines'][3] | default([])
+             + vrf['stdout_lines'][4] | default([]) + vrf['stdout_lines'][5] | default([]) + vrf['stdout_lines'][6] | default([]) + vrf['stdout_lines'][7] | default([])
+             + vrf['stdout_lines'][8] | default([]) + vrf['stdout_lines'][9] | default([]) + vrf['stdout_lines'][10] | default([]) + int_vpn_voz_unificada | default([])}}"
+      when: 
+        - "item | regex_search('\\s+([E]\\w*[\\-\\/\\d\\w]*)\\.*\\d*') is not none"
+
+        
+ 
+    - name: LISTAR INTERFACES VIRTUALES Eth-Trunk
+      ce_command:
+        commands:
+          - 'display {{item}} | inc Giga'
+      register: virtual
+      retries: 2
+      delay: 2
+      until: virtual is not failed 
+      with_items:
+        - "{{interface_virtual | unique }}"
+      when:
+        - "interface_virtual is defined"
+
+ 
+    - name: variable con output crudo
+      set_fact:
+        output_crudo: "{{output_crudo | default([]) + [ item['stdout_lines'][0]  ]  }}"
+      delegate_to: localhost
+      with_items:
+        - "{{virtual['results']}}"
+      when: 
+        - "item['stdout_lines'][0]  is not none"
+        - "interface_virtual is defined"        
+
+
+    - name: variable con output crudo en forma de lista
+      set_fact:
+        output_compilado: "{{output_crudo | flatten  }}"
+      delegate_to: localhost
+      when: 
+        - "interface_virtual is defined"
+
+
+    - name: LISTAR interfaces_compilado
+      set_fact:
+        interfaces_compilado: "{{ interfaces_compilado | default([]) + ['interface ' + item | regex_search('^(?!\\()([G]\\w*[\\-\\/\\d\\w]*)\\.*\\d*') | trim ]}}"
+      delegate_to: localhost
+      with_items:
+        - "{{output_compilado}}"
+      when: 
+        - "interface_virtual is defined"
+        - "item | regex_search('^(?!\\()([G]\\w*[\\-\\/\\d\\w]*)\\.*\\d*') is not none"
+
+    # - name: LISTAR interfaces_compilado
+      # debug:
+        # msg: "{{interfaces_compilado}}"
+      # when: 
+        # - "interface_virtual is defined"
+        
+    # - name: PAUSAR 40 segundos
+      # pause:
+        # seconds: 40
+        
+############################# EXTRAE INTERFACES VLANs #####################################################
+
+    
+    - name: LISTAR INTERFACES VLAN HUAWEI 3G - RNC - BSC
+      set_fact:
+        interface_vlan: "{{interface_vlan | default([]) + ['vlan ' + item | regex_search('\\s+Vlanif(\\d+)\\.*', '\\1') | first] }}"
+      delegate_to: localhost
+      with_items:
+        - "{{vrf['stdout_lines'][0] | default([]) + vrf['stdout_lines'][1] | default([]) + vrf['stdout_lines'][2] | default([]) + vrf['stdout_lines'][3] | default([])
+             + vrf['stdout_lines'][4] | default([]) + vrf['stdout_lines'][5] | default([]) + vrf['stdout_lines'][6] | default([]) + vrf['stdout_lines'][7] | default([])
+             + vrf['stdout_lines'][8] | default([]) + vrf['stdout_lines'][9] | default([]) + vrf['stdout_lines'][10] | default([]) + int_vpn_voz_unificada | default([])}}"
+      when: 
+        - "item | regex_search('\\s+Vlanif(\\d+)\\.*') is not none"
+      # tags:
+        # - configuration        
+    
+    - name: LISTAR INTERFACES VLANs
+      ce_command:
+        commands:
+          - 'display {{item}} verbose | begin Interface'
+          # - 'display {{item}} verbose'   #PARA V6
+      register: vlan
+      retries: 2
+      delay: 2
+      until: vlan is not failed 
+      with_items:
+        - "{{interface_vlan}}"
+      when:
+        - "interface_vlan is defined"
+      # tags:
+        # - configuration 
+
+    - name: variable con output crudo vlan
+      set_fact:
+        output_crudo_vlan: "{{output_crudo_vlan | default([]) + [ item['stdout_lines'][0]  ] }}"
+      delegate_to: localhost
+      with_items:
+        - "{{vlan['results']}}"
+      when: 
+        - "item['stdout_lines'][0] is not none"
+        - "interface_vlan is defined"
+      # tags:
+        # - configuration        
+
+    - name: variable con output crudo vlan en forma de lista
+      set_fact:
+        output_compilado_vlan: "{{output_crudo_vlan | flatten  }}"
+      delegate_to: localhost
+      when: 
+        - "interface_vlan is defined"
+      # tags:
+        # - configuration
+
+    # - name: PAUSAR 40 segundos
+      # pause:
+        # seconds: 40
+        
+    # - name: LISTAR output_compilado_vlan
+      # debug:
+        # msg: "{{output_compilado_vlan}}"
+  
+    # - name: LISTAR ETH-TRUNK por VLANs 
+      # debug:
+        # msg: "{{item | regex_search('^([E]\\w*[\\-\\/\\d\\w]*)\\s+', '\\1') | first}}"
+      # with_items:
+        # - "{{output_compilado_vlan }}"
+      # when:
+        # - "interface_vlan is defined"
+        # - "item | regex_search('^([E]\\w*[\\-\\/\\d\\w]*)\\.*\\d*') is not none"
+      # tags:
+        # - configuration
+
+########################## EXTRAE INTERFACE GigabitEthernet DE COMPONENTE VLANS #####################
+ 
+    - name: LISTAR INTERFACES GE-VLAN HUAWEI 3G - RNC - BSC # solo para vlan compuesta por GigabitEthernet
+      set_fact:
+        interface_vlan_G: "{{interface_vlan_G | default([]) + ['interface ' + item | regex_search('^([G]\\w*[\\-\\/\\d\\w]*)\\.*\\d*', '\\1') | first ] }}"
+      delegate_to: localhost
+      with_items:
+        - "{{output_compilado_vlan}}"
+      when:
+        - "interface_vlan is defined"
+        - "item | regex_search('^([G]\\w*[\\-\\/\\d\\w]*)\\.*\\d*') is not none" 
+      # tags:
+        # - configuration 
+
+    # - name: LISTAR interface_vlan_G
+      # debug:
+        # msg: "{{interface_vlan_G}}"
+
+    - name: LISTAR INTERFACES GE-VLAN HUAWEI
+      ce_command:
+        commands:
+          - 'display current-configuration {{item}} | i allow-pass'
+          - 'display current-configuration {{item}} | i principal'
+      register: vlan_G
+      retries: 2
+      delay: 2
+      until: vlan_G is not failed 
+      with_items:
+        - "{{interface_vlan_G | unique}}"
+      when:
+        - "interface_vlan_G is defined"
+      # tags:
+        # - configuration
+
+    # - name: LISTAR vlan_G
+      # debug:
+        # msg: "{{vlan_G | to_nice_json}}"
+      # tags:
+        # - configuration
+        
+    - name: ALMACENAR NRO VLAN GE-VLAN HUAWEI 3G - RNC - BSC # solo para vlan compuesta por Eth-Trunk
+      set_fact:
+        nro_ge_vlan: "{{nro_ge_vlan | default([]) + ['' if(item['stdout_lines'][0][2] is undefined) else item['stdout_lines'][0][2]| regex_search('(\\d+.*)')] }}"
+        nro_ge_vlan_principal: "{{nro_ge_vlan_principal | default([]) + ['' if(item['stdout_lines'][1][2] is undefined) else item['stdout_lines'][1][2]| regex_search('(\\d+.*)')] }}"
+      delegate_to: localhost
+      with_items:
+        - "{{vlan_G['results']}}"    
+      when:
+        - "interface_vlan_G is defined"
+      # tags:
+        # - configuration
+
+    # - name: LISTAR nro_ge_vlan y nro_ge_vlan_principal
+      # debug:
+        # msg: 
+          # - "{{nro_ge_vlan}}"
+          # - "{{nro_ge_vlan_principal}}"
+      # tags:
+        # - configuration    
+ 
+                 
+    # - name: LISTAR GE-VLAN TRUNK APLICACION DE TECO-QoS-Classifier Y 7 COLAS
+      # debug:
+        # msg: "{% if item[2] != '' and item[2] is not none %} 
+              # {{item[0] 
+                 # + '\nundo trust upstream principal vlan ' + item[2]
+                 # + '\ntrust upstream TECO-QoS-Classifier' 
+                 # + '\ntrust 8021p vlan ' + item[1] + port_queue}}
+                # {% else  %}
+              # {{item[0] 
+                 # + '\ntrust upstream TECO-QoS-Classifier' 
+                 # + '\ntrust 8021p vlan ' + item[1] + port_queue}}
+               # {% endif %}"
+      # with_together:
+        # - "{{interface_vlan_G | unique}}"
+        # - "{{nro_ge_vlan}}"
+        # - "{{nro_ge_vlan_principal}}"
+      # when:
+        # - "item[0] is defined"
+        # - "item[1] != ''"
+      # tags:
+        # - configuration
+
+    # - name: LISTAR GE-VLAN TRUNK con principal
+      # debug:
+        # msg: "{{item[0] 
+                 # + '\nundo trust upstream principal vlan ' + item[1]}}"
+      # with_together:
+        # - "{{interface_vlan_G | unique}}"
+        # - "{{nro_ge_vlan_principal}}"
+      # when:
+        # - "item[0] is defined"
+        # - "item[1] != ''"
+        # - "item[1] is not none"
+      # tags:
+        # - configuration
+
+    # - name: LISTAR GE-VLAN TRUNK CON vlan-mapping
+      # debug:
+        # msg: "{{item[0]}}"
+      # with_together:
+        # - "{{interface_vlan_G | unique}}"
+        # - "{{nro_ge_vlan}}"
+      # when:
+        # - "item[0] is defined"
+        # - "item[1] == ''"
+      # tags:
+        # - configuration
+        
+    # - name: PAUSAR 10 segundos
+      # pause:
+        # seconds: 10
+        
+########################## EXTRAE INTERFACE ETH-TRUNK DE COMPONENTE VLANS #####################
+
+    - name: LISTAR INTERFACES ETH-VLAN HUAWEI 3G - RNC - BSC # solo para vlan compuesta por Eth-Trunk
+      set_fact:
+        interface_eth_vlan: "{{interface_eth_vlan | default([]) + [item | regex_search('^([E]\\w*[\\-\\/\\d\\w]*)\\s+', '\\1') | first] }}"
+      delegate_to: localhost
+      with_items:
+        - "{{output_compilado_vlan}}"
+      when:
+        - "interface_vlan is defined"
+        - "item | regex_search('^([E]\\w*[\\-\\/\\d\\w]*)\\.*\\d*') is not none"
+      # tags:
+        # - configuration
+
+    # - name: LISTAR interface_eth_vlan
+      # debug:
+        # msg: "{{interface_eth_vlan}}"
+
+    - name: LISTAR INTERFACES ETH-TRUNK DE VLANs
+      ce_command:
+        commands:
+          - 'dis int description {{item}}'
+      register: eth_vlan
+      retries: 2
+      delay: 2
+      until: eth_vlan is not failed 
+      with_items:
+        - "{{interface_eth_vlan | unique}}"
+      when:
+        - "interface_eth_vlan is defined"
+      # tags:
+        # - configuration
+        
+    - name: ALMACENAR INTERFACES ETH-VLAN UNIFICADA HUAWEI 3G - RNC - BSC # solo para vlan compuesta por Eth-Trunk
+      set_fact:
+        interface_eth_vlan_unificada: "{{interface_eth_vlan_unificada | default([]) + ['interface ' + item[0]] }}"
+      delegate_to: localhost
+      with_together:
+        - "{{interface_eth_vlan | unique}}"
+        - "{{eth_vlan['results']}}"
+      when:
+        - "interface_eth_vlan is defined"
+        - "'RNC' in item[1]['stdout'][0] or 'BSC' in item[1]['stdout'][0]"
+      # tags:
+        # - configuration
+        
+    # - name: LISTAR interface_eth_vlan_unificada
+      # debug:
+        # msg: "{{interface_eth_vlan_unificada}}"
+
+    - name: LISTAR INTERFACES ETH-TRUNK UNIFICADA DE VLANs
+      ce_command:
+        commands:
+          - 'display current-configuration {{item}} | i principal'
+      register: eth_vlan_uni
+      retries: 2
+      delay: 2
+      until: eth_vlan_uni is not failed 
+      with_items:
+        - "{{interface_eth_vlan_unificada}}"
+      when:
+        - "interface_eth_vlan_unificada is defined"
+      # tags:
+        # - configuration
+        
+    # - name: LISTAR eth_vlan_uni
+      # debug:
+        # msg: "{{item['stdout_lines'][0][1]}}"
+      # with_items:
+        # - "{{eth_vlan_uni['results']}}"
+    
+    - name: ALMACENAR NRO VLAN ETH-VLAN HUAWEI 3G - RNC - BSC # solo para vlan compuesta por Eth-Trunk
+      set_fact:
+        nro_eth_vlan: "{{nro_eth_vlan | default([]) + [item['stdout_lines'][0][1]| regex_search('(\\d+.*)')] }}"
+      delegate_to: localhost
+      with_items:
+        - "{{eth_vlan_uni['results']}}"    
+      when:
+        - "interface_eth_vlan_unificada is defined"
+      # tags:
+        # - configuration
+        
+    # - name: LISTAR ETH TRUNK UNDO PRINCIPAL Y APLICACION DE TECO-QoS-Classifier
+      # debug:
+        # msg: "{{item[0] 
+                 # + '\nundo trust upstream principal vlan ' + item[1] 
+                 # + '\ntrust upstream TECO-QoS-Classifier vlan ' + item[1] 
+                 # + '\ntrust 8021p vlan ' + item[1] }}"
+      # with_together:
+        # - "{{interface_eth_vlan_unificada}}"
+        # - "{{nro_eth_vlan}}"
+      # when:
+        # - "item[0] is defined"
+        # - "item[1] is not none"
+      # tags:
+        # - configuration
+
+    # - name: LISTAR ETH TRUNK CON vlan-mapping
+      # debug:
+        # msg: "{{item[0]}}"
+      # with_together:
+        # - "{{interface_eth_vlan_unificada}}"
+        # - "{{nro_eth_vlan}}"
+      # when:
+        # - "item[0] is defined"
+        # - "item[1] is none"
+      # tags:
+        # - configuration
+        
+    # - name: PAUSAR 10 segundos
+      # pause:
+        # seconds: 10
+        
+##################################  EXTRAE COMPONENTES GIGA DE ETH-TRUNK ###############################################################################
+
+    - name: LISTAR INTERFACES VIRTUALES Eth-Trunk
+      ce_command:
+        commands:
+          - 'display {{item}}'
+      register: virtual_2
+      retries: 2
+      delay: 2
+      until: virtual_2 is not failed 
+      with_items:
+        - "{{interface_eth_vlan_unificada}}"
+      when:
+        - "interface_eth_vlan_unificada is defined"
+
+ 
+    - name: variable con output crudo
+      set_fact:
+        output_crudo_2: "{{output_crudo_2 | default([]) + [ item['stdout_lines'][0]  ]  }}"
+      delegate_to: localhost
+      with_items:
+        - "{{virtual_2['results']}}"
+      when: 
+        - "item['stdout_lines'][0]  is not none"
+        - "interface_eth_vlan_unificada is defined"        
+
+
+    - name: variable con output crudo en forma de lista
+      set_fact:
+        output_compilado_2: "{{output_crudo_2 | flatten  }}"
+      delegate_to: localhost
+      when: 
+        - "interface_eth_vlan_unificada is defined"
+
+
+    - name: LISTAR interfaces_compilado
+      set_fact:
+        interfaces_compilado_2: "{{ interfaces_compilado_2 | default([]) + ['interface ' + item | regex_search('^(?!\\()([G]\\w*[\\-\\/\\d\\w]*)\\.*\\d*') | trim ]}}" #INTERFACE GIGA
+      delegate_to: localhost
+      with_items:
+        - "{{output_compilado_2}}"
+      when: 
+        - "interface_eth_vlan_unificada is defined"
+        - "item | regex_search('^(?!\\()([G]\\w*[\\-\\/\\d\\w]*)\\.*\\d*') is not none"
+
+    # - name: LISTAR interfaces_compilado_2
+      # debug:
+        # msg: "{{interfaces_compilado_2}}"
+      # when: 
+        # - "interface_eth_vlan_unificada is defined"
+
+       
+ ############################# ESCRITURA INTERFACES FISICAS Y VIRTUALES #####################################################
+ 
+    - name: compilar todas las interfaces
+      set_fact:
+        total_interfaces: "{{ total_interfaces | default([]) + [ item ] }}" 
+      delegate_to: localhost
+      with_items:
+        - "{{ interface_fisica_unicas | default([]) + interfaces_compilado | default([]) + interfaces_compilado_2 | default([]) }}"
+      when: 
+        - "interface_fisica is defined or interfaces_compilado is defined or interfaces_compilado_2 is defined or interface_vlan_G is defined"
+ 
+
+    - name: ALMACENAR SALIDA TOTAL INTERFACES FISICAS A DESPLEGAR HUAWEI
+      set_fact:
+        bloque_config:  "{{ bloque_config | default([]) + [ item ]}}"
+      delegate_to: localhost
+      with_items:
+        - "{{ total_interfaces  | unique  }}"
+      when: 
+        - "total_interfaces is defined"
+
+    # - name: LISTAR bloque_config 
+      # debug:
+        # msg: "{{bloque_config}}"
+          
+    - name: ALMACENAR CANTIDAD DE INTERFACES FISICAS A DESPLEGAR
+      set_fact: 
+        total_interfaces_fisicas: "{{ '0' if (bloque_config is undefined) else bloque_config | count }}"
+      delegate_to: localhost      
+
+############################# EXTRAE SUB-INTERFACES DISTINTAS VPNs ##################################################### 
+
+
+    - name: ALMACENAR SUB-INTERFACES MOVIL GIGA Y ETH-TRUNK HUAWEI POR VRF
+      set_fact:
+        sub_interface_movil: "{{ sub_interface_movil | default([]) + [ 'interface ' + item | regex_search('\\s+([G|E]\\w*[\\-\\/\\d\\w]*\\.{1}\\d*)', '\\1') | first ] }}"
+      delegate_to: localhost
+      with_items:
+        - "{{vrf['stdout_lines'][0] | default([]) + vrf['stdout_lines'][1] | default([]) + vrf['stdout_lines'][2] | default([]) + vrf['stdout_lines'][3] | default([])
+             + vrf['stdout_lines'][4] | default([]) + vrf['stdout_lines'][5] | default([]) + vrf['stdout_lines'][6] | default([]) + vrf['stdout_lines'][7] | default([])
+             + vrf['stdout_lines'][8] | default([]) + vrf['stdout_lines'][9] | default([]) + vrf['stdout_lines'][10] | default([]) + int_vpn_voz_unificada | default([])}}"
+      when: 
+        - "item | regex_search('\\s+([G|E]\\w*[\\-\\/\\d\\w]*\\.{1}\\d*)') is not none"
+      # tags:
+        # - subinterfaces
+
+    - name: ALMACENAR CANTIDAD DE SUB-INTERFACES MOVIL A DESPLEGAR
+      set_fact: 
+        total_sub_interface_movil: "{{ '0' if (sub_interface_movil is undefined) else sub_interface_movil | count }}"
+      delegate_to: localhost
+      # tags:
+        # - subinterfaces
+        
+    - name: ALMACENAR TOTAL INTERFACES MOVIL A DESPLEGAR
+      set_fact: 
+        total_interfaces_movil: "{{ total_interfaces_fisicas | int +  total_sub_interface_movil | int}}"
+      delegate_to: localhost
+      
+########################### ESCRITURA INTERFACES FISICAS Y SUBINTERFACES #####################################################
+ 
+    - name: EXPORTAR SALIDA INTERFACES A DESPLEGAR HUAWEI
+      lineinfile:
+        dest: "./roles/QoS_II/output/huawei/MOVIL/{{inventory_hostname}}/interfaces_FISICAS_MOVIL.txt" 
+        line: "{{ item + port_queue}}"
+        # line: "{{item}}"
+    # si no existe lo crea
+        create: yes
+    # permisos Lectura Escritura
+        mode: '666'
+        insertafter: EOF
+      with_items:
+        - "{{ bloque_config | default([]) }}"
+      when: 
+        - "bloque_config is defined" 
+
+
+    - name: EXPORTAR SALIDA SUB-INTERFACES MOVIL A DESPLEGAR HUAWEI
+      lineinfile:
+        dest: "./roles/QoS_II/output/huawei/MOVIL/{{inventory_hostname}}/interfaces_SUB_INTERFACES_MOVIL.txt" 
+        line: "{{ item + trust }}"
+        # line: "{{item}}"
+    # si no existe lo crea
+        create: yes
+    # permisos Lectura Escritura
+        mode: '666'
+        insertafter: EOF
+      with_items:
+        - "{{ sub_interface_movil | default([]) }}"
+      when: 
+        - "sub_interface_movil is defined"
+
+        
+    - name: EXPORTAR SALIDA GE-VLAN TRUNK APLICACION DE TECO-QoS-Classifier Y 7 COLAS
+      lineinfile:
+        dest: "./roles/QoS_II/output/huawei/MOVIL/{{inventory_hostname}}/interfaces_GE_VLAN_MOVIL.txt" 
+        line: "{% if item[2] != '' and item[2] is not none %} 
+              {{item[0] 
+                 + '\nundo trust upstream principal vlan ' + item[2]
+                 + '\ntrust upstream TECO-QoS-Classifier' 
+                 + '\ntrust 8021p vlan ' + item[1] + port_queue}}
+                {% else  %}
+              {{item[0] 
+                 + '\ntrust upstream TECO-QoS-Classifier' 
+                 + '\ntrust 8021p vlan ' + item[1] + port_queue}}
+               {% endif %}"
+        # line: "{{item[0]}}"
+    # si no existe lo crea
+        create: yes
+    # permisos Lectura Escritura
+        mode: '666'
+        insertafter: EOF
+      with_together:
+        - "{{interface_vlan_G | unique}}"
+        - "{{nro_ge_vlan}}"
+        - "{{nro_ge_vlan_principal}}"
+      when:
+        - "item[0] is defined"
+        - "item[1] != ''"
+
+
+    # - name: EXPORTAR SALIDA GE-VLAN TRUNK GE-VLAN TRUNK con principal a borrar
+      # lineinfile:
+        # dest: "./roles/QoS_II/output/huawei/MOVIL/{{inventory_hostname}}/interfaces_GE_VLAN_MOVIL.txt" 
+        # line: "{{item[0] 
+                 # + '\nundo trust upstream principal vlan ' + item[1]}}" 
+        # line: "{{item[0]}}"
+    # si no existe lo crea
+        # create: yes
+    # permisos Lectura Escritura
+        # mode: '666'
+        # insertafter: EOF
+      # with_together:
+        # - "{{interface_vlan_G | unique}}"
+        # - "{{nro_ge_vlan_principal}}"
+      # when:
+        # - "item[0] is defined"
+        # - "item[1] != ''"
+        # - "item[1] is not none"       
+
+    - name: EXPORTAR SALIDA INTERFACES A REVISAR GE-VLAN
+      lineinfile:
+        dest: "./roles/QoS_II/output/huawei/MOVIL/{{inventory_hostname}}/interfaces_revisar_MOVIL.txt" 
+        line: "{{item[0]}}"
+    # si no existe lo crea
+        create: yes
+    # permisos Lectura Escritura
+        mode: '666'
+        insertafter: EOF
+      with_together:
+        - "{{interface_vlan_G | unique}}"
+        - "{{nro_ge_vlan}}"
+      when:
+        - "item[0] is defined"
+        - "item[1] == ''"
+        
+    - name: EXPORTAR SALIDA ETH TRUNK DE VLANS Y APLICACION DE TECO-QoS-Classifier
+      lineinfile:
+        dest: "./roles/QoS_II/output/huawei/MOVIL/{{inventory_hostname}}/interfaces_ETH_VLAN_MOVIL.txt" 
+        line: "{{item[0] 
+                 + '\nundo trust upstream principal vlan ' + item[1] 
+                 + '\ntrust upstream TECO-QoS-Classifier'
+                 + '\ntrust 8021p vlan ' + item[1] }}"
+        # line: "{{item[0]}}"
+    # si no existe lo crea
+        create: yes
+    # permisos Lectura Escritura
+        mode: '666'
+        insertafter: EOF
+      with_together:
+        - "{{interface_eth_vlan_unificada}}"
+        - "{{nro_eth_vlan}}"
+      when:
+        - "interface_eth_vlan_unificada is defined"
+        - "item[1] is not none"
+ 
+    # - name: LISTAR ETH TRUNK CON vlan-mapping
+      # debug:
+        # msg: "{{item[0]}}"
+      # with_together:
+        # - "{{interface_eth_vlan_unificada}}"
+        # - "{{nro_eth_vlan}}"
+      # when:
+        # - "item[0] is defined"
+        # - "item[1] is none"
+      # tags:
+        # - configuration
+
+    - name: EXPORTAR SALIDA INTERFACES A REVISAR ETH-VLAN
+      lineinfile:
+        dest: "./roles/QoS_II/output/huawei/MOVIL/{{inventory_hostname}}/interfaces_revisar_MOVIL.txt" 
+        line: "{{item[0]}}"
+    # si no existe lo crea
+        create: yes
+    # permisos Lectura Escritura
+        mode: '666'
+        insertafter: EOF
+      with_together:
+        - "{{interface_eth_vlan_unificada}}"
+        - "{{nro_eth_vlan}}"
+      when:
+        - "item[0] is defined"
+        - "item[1] is none"
+        
+############################################################################################################ 
+
+    # - include: despliegue_movil_H.yml

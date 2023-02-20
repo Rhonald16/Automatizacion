@@ -1,0 +1,99 @@
+---
+# - name: Migración Servicio TWAMP
+  # hosts: NORMALIZACION
+  # connection: network_cli
+  # gather_facts: no
+  # serial: 1
+  # tasks:
+#--------------------------LISTAR TAREAS-----------------------------------------------------------------
+#ansible-playbook despliegue_TWAMP.yml -v --list-task
+
+#--------------------------APLCAR PLAYBOOK---------------------------------------------------------------
+#ansible-playbook despliegue_TWAMP.yml -v -e check_ping=PRE o POST
+#--------------------------------------------------------------------------------------------------------
+
+######################  EXTRAER INFORMACION DEL NODO ACTUAL  ###########################
+
+      # Lectura del archivo csv  base con la informacion de: 
+      # nombre de nodo, IP de loopback,  IP de red, AS, comunidades
+ 
+    - name: Leer archivo datos CSV 
+      read_csv:
+        path: "./roles/TWAMP/files/datos.csv"
+        fieldnames: nodo,ip_sfp_twamp
+        delimiter: ';'
+      register: datos
+      delegate_to: localhost
+
+
+    - name: filtrar nodos
+      set_fact:
+        nodos_filtrados: "{{nodos_filtrados | default([]) + [ item ] }}"
+      with_items:
+        - "{{datos.list}}"
+      when:
+        - " item.nodo == inventory_hostname | trim "    
+
+    # - name: Mostrar ip_sfp_twamp por nodo
+      # debug:
+        # msg: 
+          # - "{{item.ip_sfp_twamp}}" 
+      # with_items:
+        # - "{{nodos_filtrados}}"
+          
+######################  VERIFICACIONES PING IP_SFP_TWAMP  ###########################
+
+    - name: Mostrar VPN PRE o POST
+      debug:
+        msg: 
+          - "El ping se realiza con la VRF {{'vpn-gestion-sdh-huawei ' if(check_ping == 'PRE')else 'VPN-TECO-SONDAS-TWAMP '}}"
+
+    - name: Verificaciones ping IP_SFP_TWAMP nodo Huawei 
+      iosxr_command:
+        commands:
+          - "{{'ping vrf ' + ('vpn-gestion-sdh-huawei ' if(check_ping == 'PRE')else 'VPN-TECO-SONDAS-TWAMP ') + item.ip_sfp_twamp}}"
+      register: ping
+      retries: 2
+      delay: 2
+      until: ping is not failed
+      with_items:
+        - "{{nodos_filtrados}}"
+
+    # - name: Mostrar ip_sfp_twamp por nodo
+      # debug:
+        # msg: 
+          # - "{{item['stdout_lines'][0][0:3]}}"
+      # with_items:
+        # - "{{ping['results']}}"
+        
+#################### EXPORTAR RESPUESTA DE PING A UN ARCHIVO ################
+
+    - name: EXPORTAR SALIDA RESPUESTA DE PING {{inventory_hostname}}
+      lineinfile:
+        dest: "./roles/TWAMP/output/HUAWEI/{{inventory_hostname}}_ping.txt"
+        line: "{{item['stdout_lines'][0][0:3] | to_nice_json}}"
+    # si no existe lo crea
+        create: yes
+    # permisos Lectura Escritura
+        mode: '666'
+        insertafter: EOF
+      with_items:
+        - "{{ping['results']}}"        
+
+    - name: EXPORTAR SEPARADOR
+      lineinfile:
+        dest: "./roles/TWAMP/output/HUAWEI/{{inventory_hostname}}_ping.txt"
+        line: "########################################### POST VERIFICACION PING ##############################################################################"
+    # si no existe lo crea
+        create: yes
+    # permisos Lectura Escritura
+        mode: '666'
+        insertafter: EOF 
+      when:
+        - "check_ping == 'PRE'"
+        
+################################ DESPLIEGUE ################################################# 
+
+    # - include: despliegue_TWAMP_H.yml       
+      # when:
+        # - "check_ping == 'PRE'" 

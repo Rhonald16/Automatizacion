@@ -1,0 +1,36 @@
+---
+# - name: Migración Servicio TWAMP
+  # hosts: NORMALIZACION
+  # connection: network_cli
+  # gather_facts: no
+  # serial: 1
+  # tasks:
+#--------------------------LISTAR TAREAS-----------------------------------------------------------------
+#ansible-playbook despliegue_TWAMP_H.yml -v --list-task
+
+#--------------------------APLCAR PLAYBOOK---------------------------------------------------------------
+#ansible-playbook despliegue_TWAMP.yml -v
+#--------------------------------------------------------------------------------------------------------
+
+    - name: VARIABLE NRO. ICD
+      set_fact: 
+        icd: "11857027"
+      delegate_to: localhost
+    
+    - name: MOSTRAR ARCHIVO DE DESPLIEGUE TWAMP {{inventory_hostname}}
+      debug:
+        msg:
+          - "{{ lookup('file', './roles/TWAMP/files/CISCO/{{inventory_hostname}}.txt', errors='ignore') }}"
+ 
+    # - name:  IMPACTO Migración Servicio TWAMP {{inventory_hostname}}
+      # iosxr_command:
+        # commands:
+          # - 'conf t'
+          # - "{{ lookup('file', './roles/TWAMP/files/CISCO/{{inventory_hostname}}.txt', errors='ignore') }}"
+          # - 'commit label ICD_{{icd}}'
+      # register: impacto_twamp
+      # retries: 2
+      # delay: 2
+      # until: impacto_twamp is not failed
+      
+      

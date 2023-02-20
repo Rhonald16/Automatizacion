@@ -1,0 +1,17 @@
+---
+
+
+
+# - include: verificacion_qos_subInt_H.yml
+# - include: despliegue_qos_Int_H.yml
+
+- include: despliegue_movil_H.yml
+  # - include: verificacion_movil_H.yml
+
+# - include: verificacion_residencial_H.yml
+# - include: despliegue_residencial_H.yml  
+# - include: despliegue_residencial_int_pppoe_H.yml  
+  
+  # loop: "{{vpns}}"
+  # loop_control: 
+    # loop_var: nombre_vpn  # cambio la iteracion que hacia con el nombre item por nombre_vpn  

@@ -1,0 +1,514 @@
+---
+# - name: APLICACION DE QOS FASE II EN INTERFACES RESIDENCIAL NODOS HUAWEI
+  # hosts: NORMALIZACION
+  # connection: network_cli
+  # gather_facts: no
+  # serial: 1
+  # tasks:
+  
+#--------------------------LISTAR TAREAS-----------------------------------------------------------------
+#ansible-playbook QoS_II.yml --list-task
+
+#--------------------------APLCAR PLAYBOOK---------------------------------------------------------------
+#ansible-playbook QoS_II.yml -v --tags="configuration"
+#--------------------------------------------------------------------------------------------------------
+
+############################ CHEQUEAR SI ARCHIVO EXITE ###############
+
+    - name: CHEQUEAR SI EL ARCHIVO DE IMPACTO DE SUB-INTERFACES HUAWEI EXISTE
+      stat:
+        path: "./roles/QoS_II/output/huawei/RESIDENCIAL/{{inventory_hostname}}_SUB_INTERFACES.txt"
+      register: file_checker
+
+
+    - name: Validar SI EL ARCHIVO DE CONFIGURACION DE SUB-INTERFACES EXISTE PREVIAMENTE
+      assert:
+        that:
+          - not file_checker.stat.exists
+        fail_msg: "fail. Archivo de configuracion de sub-interfaces del nodo {{inventory_hostname}} existe"
+        success_msg: "ok. Nodo {{inventory_hostname}} para crear archivo de sub-interfaces"
+
+    - name: CHEQUEAR SI EL ARCHIVO DE IMPACTO DE INTERFACES FISICAS HUAWEI EXISTE
+      stat:
+        path: "./roles/QoS_II/output/huawei/RESIDENCIAL/{{inventory_hostname}}_INTERFACES_FISICAS.txt"
+      register: file_checker_2
+
+
+    - name: Validar SI EL ARCHIVO DE CONFIGURACION INTERFACES FISICAS EXISTE PREVIAMENTE
+      assert:
+        that:
+          - not file_checker_2.stat.exists
+        fail_msg: "fail. Archivo de configuracion de interfaces fisicas del nodo {{inventory_hostname}} existe"
+        success_msg: "ok. Nodo {{inventory_hostname}} para crear archivo de interfaces fisicas"
+        
+#################################### LISTAR INTERFACES ###################################################################      
+
+    - name: LISTAR INTERFACES RESIDENCIAL HUAWEI
+      ce_command:
+        commands:
+          - 'dis ip vpn-instance toip-vpn interface' # TOIP DSLAM HUAWEI
+          - 'dis curr interface | i .4101$' # DATOS DSLAM HUAWEI
+          - 'dis ip vpn-instance vpn-personal-voz interface' # DATOS NGN HUAWEI
+          - 'dis curr | i interface | i .30$' # DATOS GPON HUAWEI
+          - 'dis ip vpn-instance vrf-ftth-toip-symphonica interface' # TOIP GPON HUAWEI
+      register: int
+      retries: 2
+      delay: 2
+      until: int is not failed
+      tags:
+        - configuration
+
+    # - name: TIPO DE VARIABLE vrf
+      # debug:
+        # msg: "{{int['stdout_lines'][0] | type_debug}}" # me dice el tipo de variable(lista,diccionario,etc)
+        
+    # - name: Debug TOIP DSLAM HUAWEI
+      # debug:
+        # msg: "{{item | regex_search('([G|E]\\w+\\S+\\d)')}}"
+      # with_items:
+        # - "{{int['stdout_lines'][0]}}"
+      # when:
+        # - "item | regex_search('([G|E]\\w+\\S+\\d)') is not none"
+        
+    # - name: Debug DATOS DSLAM HUAWEI
+      # debug:
+        # msg: "{{item | regex_search('interface\\s[G|E]\\w+\\S+\\.*4101$')}}"
+      # with_items:
+        # - "{{int['stdout_lines'][1]}}"
+      # when:
+        # - "item | regex_search('interface\\s[G|E]\\w+\\S+\\.*4101$') is not none"
+        
+
+    # - name: Debug RTP NGN HUAWEI
+      # debug:
+        # msg: "{{item | regex_search('([G|E].*3$|[G|E].*3,)') | regex_replace(',' ,'')}}"
+      # with_items:
+        # - "{{int['stdout_lines'][2]}}"
+      # when:
+        # - "item | regex_search('([G|E].*3$|[G|E].*3,)') is not none"        
+      # tags:
+        # - configuration
+        
+    # - name: Debug DATOS GPON HUAWEI
+      # debug:
+        # msg: "{{item | regex_search('(interface\\s[G|E]\\w+\\S+\\.*30$)')}}"
+      # with_items:
+        # - "{{int['stdout_lines'][3]}}"
+      # when:
+        # - "item | regex_search('(interface\\s[G|E]\\w+\\S+\\.*30$)') is not none"
+
+        
+    # - name: Debug TOIP GPON HUAWEI
+      # debug:
+        # msg: "{{item | regex_search('\\s([G|E]\\w+\\S+\\d)', '\\1') | first}}"
+      # with_items:
+        # - "{{int['stdout_lines'][4]}}"
+      # when:
+        # - "item | regex_search('\\s([G|E]\\w+\\S+\\d)') is not none"
+
+    # - name: PAUSAR 20 segundos
+      # pause:
+        # seconds: 20 
+      # tags:
+        # - configuration
+        
+################################ VARIABLES TRUST PARA INTERFACES A IMPACTAR  ########################################################        
+
+    - name: variable trust
+      set_fact:
+        trust: "{{'\ntrust upstream TECO-QoS-Classifier\ntrust 8021p'}}"
+      delegate_to: localhost
+      
+    - name: variable undo trust
+      set_fact:
+        undo_trust: "{{'\nundo trust upstream\nundo trust 8021p'}}"
+      delegate_to: localhost
+ 
+    - name: variable port_queue
+      set_fact:
+        port_queue:  "{{'\nport-queue be wfq weight 30 outbound
+                         \nport-queue af1 wfq weight 5 outbound 
+                         \nport-queue af2 wfq weight 10 outbound
+                         \nport-queue af3 wfq weight 10 outbound
+                         \nport-queue af4 wfq weight 20 outbound
+                         \nport-queue ef pq shaping shaping-percentage 20 outbound
+                         \nport-queue cs6 wfq weight 5 outbound'}}"
+
+    # - name: PAUSAR 20 segundos
+      # pause:
+        # seconds: 20 
+        
+################################ ARMAR LISTA INTERFACES TOIP DSLAM HUAWEI  #######################################
+
+    - name: ARMADO DE LISTA INTERFACES TOIP DSLAM HUAWEI
+      set_fact:
+        toip_dslam_huawei: "{{toip_dslam_huawei | default([]) + ['interface ' + item | regex_search('\\s([G|E]\\w+\\S+\\d)', '\\1') | first]}}"
+      delegate_to: localhost        
+      with_items:
+        - "{{int['stdout_lines'][0]}}"
+      when:
+        - "item | regex_search('\\s([G|E]\\w+\\S+\\d)') is not none"
+
+    # - name: Debug TOIP DSLAM HUAWEI
+      # debug:
+        # msg: "{{ toip_dslam_huawei }}"     
+
+    # - name: PAUSAR 20 segundos
+      # pause:
+        # seconds: 20       
+
+################################ ARMAR LISTA INTERFACES DATOS DSLAM HUAWEI  ######################################################## 
+
+        
+    - name: AUXILIAR PARA ARMADO DE LISTA INTERFACES DATOS DSLAM HUAWEI
+      set_fact:
+        aux_datos_dslam_huawei: "{{aux_datos_dslam_huawei | default([]) + [item | regex_search('interface\\s[G|E]\\w+\\S+\\.*4101$')]}}" #TRUST
+      delegate_to: localhost
+      with_items:
+        - "{{int['stdout_lines'][1]}}"
+      when:
+        - "item | regex_search('interface\\s[G|E]\\w+\\S+\\.*4101$') is not none"
+      tags:
+        - configuration
+
+    - name: SH RUN INTERFACE AUXILIAR DATOS DSLAM HUAWEI
+      ce_command:
+        commands:
+          - 'dis curr {{item}}'
+      register: int_datos_aux
+      retries: 2
+      delay: 2
+      until: int_datos_aux is not failed
+      with_items:
+        - "{{aux_datos_dslam_huawei}}"
+      when:
+        - "aux_datos_dslam_huawei is defined"
+      tags:
+        - configuration
+        
+    - name: ARMADO DE LISTA INTERFACES DATOS DSLAM HUAWEI
+      set_fact:
+        datos_dslam_huawei: "{{datos_dslam_huawei | default([]) + [item[0]]}}" #NO-TRUST
+      delegate_to: localhost 
+      with_together:
+        - "{{aux_datos_dslam_huawei}}"
+        - "{{int_datos_aux['results']}}"
+      when:
+        - "aux_datos_dslam_huawei is defined"
+        - "'pppoe-server' not in item[1]['stdout'][0]"
+      tags:
+        - configuration
+        
+    - name: ARMADO DE LISTA INTERFACES PPPOE DATOS DSLAM HUAWEI
+      set_fact:
+        datos_dslam_huawei_pppoe: "{{datos_dslam_huawei_pppoe | default([]) + [item[0]]}}"
+      delegate_to: localhost 
+      with_together:
+        - "{{aux_datos_dslam_huawei}}"
+        - "{{int_datos_aux['results']}}"
+      when:
+        - "aux_datos_dslam_huawei is defined"
+        - "'pppoe-server' in item[1]['stdout'][0]"
+      tags:
+        - configuration
+        
+    # - name: Debug INTERFACES DATOS DSLAM HUAWEI
+      # debug:
+        # msg: "{{ datos_dslam_huawei }}"  
+      # tags:
+        # - configuration
+        
+    # - name: Debug INTERFACES DATOS PPPOE DSLAM HUAWEI
+      # debug:
+        # msg: "{{ datos_dslam_huawei_pppoe }}" 
+      # tags:
+        # - configuration
+        
+################################ ARMAR LISTA INTERFACES RTP NGN HUAWEI  ########################################################
+
+
+    - name: ARMADO DE LISTA INTERFACES RTP NGN HUAWEI
+      set_fact:
+        rtp_ngn_huawei: "{{rtp_ngn_huawei | default([]) + ['interface ' + item | regex_search('([G|E].*3$|[G|E].*3,)') | regex_replace(',' ,'')]}}" #TRUST
+      delegate_to: localhost 
+      with_items:
+        - "{{int['stdout_lines'][2]}}"
+      when:
+        - "item | regex_search('([G|E].*3$|[G|E].*3,)') is not none"
+
+    # - name: Debug RTP NGN HUAWEI
+      # debug:
+        # msg: 
+          # - "{{ rtp_ngn_huawei }}"        
+
+    # - name: PAUSAR 20 segundos
+      # pause:
+        # seconds: 20 
+        
+################################ ARMAR LISTA DATOS GPON HUAWEI  ########################################################
+
+
+    - name: ARMADO AUXILIAR DE LISTA INTERFACES DATOS GPON HUAWEI
+      set_fact:
+        aux_datos_gpon_huawei: "{{aux_datos_gpon_huawei | default([]) + [item | regex_search('(interface\\s[G|E]\\w+\\S+\\.*30$)')]}}"
+      delegate_to: localhost 
+      with_items:
+        - "{{int['stdout_lines'][3]}}"
+      when:
+        - "item | regex_search('(interface\\s[G|E]\\w+\\S+\\.*30$)') is not none"
+
+    - name: SH RUN INTERFACE AUXILIAR DATOS GPON HUAWEI
+      ce_command:
+        commands:
+          - 'dis curr {{item}}'
+      register: int_aux
+      retries: 2
+      delay: 2
+      until: int_aux is not failed
+      with_items:
+        - "{{aux_datos_gpon_huawei}}"
+      when:
+        - "aux_datos_gpon_huawei is defined"
+
+    # - name: Debug int_aux
+      # debug:
+        # msg: "{{ int_aux | to_nice_json }}"
+        
+    - name: ARMADO DE LISTA INTERFACES DATOS GPON HUAWEI
+      set_fact:
+        datos_gpon_huawei: "{{datos_gpon_huawei | default([]) + [item[0]]}}" #TRUST
+      delegate_to: localhost 
+      with_together:
+        - "{{aux_datos_gpon_huawei}}"
+        - "{{int_aux['results']}}"
+      when:
+        - "aux_datos_gpon_huawei is defined"
+        - "'GPON' in item[1]['stdout'][0]"
+
+    # - name: Debug DATOS GPON HUAWEI
+      # debug:
+        # msg: "{{ datos_gpon_huawei }}"         
+
+    # - name: PAUSAR 20 segundos
+      # pause:
+        # seconds: 20 
+        
+################################ ARMAR LISTA TOIP GPON HUAWEI  ########################################################
+
+    - name: ARMADO DE LISTA INTERFACES TOIP GPON HUAWEI
+      set_fact:
+        toip_gpon_huawei: "{{toip_gpon_huawei | default([]) + ['interface ' + item | regex_search('\\s([G|E]\\w+\\S+\\d)', '\\1') | first]}}" #TRUST
+      delegate_to: localhost
+      with_items:
+        - "{{int['stdout_lines'][4]}}"
+      when:
+        - "item | regex_search('\\s([G|E]\\w+\\S+\\d)') is not none"
+
+    # - name: Debug TOIP GPON HUAWEI
+      # debug:
+        # msg: "{{ toip_gpon_huawei }}"
+        
+########################### ARMADO INTERFACES FISICAS HUAWEI #####################################################       
+ 
+    - name: ARMADO DE LISTA INTERFACES FISICAS HUAWEI
+      set_fact:
+        interface_fisica: "{{interface_fisica | default([]) + [item | regex_search('(interface\\s+[G]\\w*[\\-\\/\\d\\w]*)\\.*\\d*', '\\1') | first]}}"
+      delegate_to: localhost
+      with_items:
+        - "{{ toip_dslam_huawei | default([]) + datos_dslam_huawei | default([]) + datos_gpon_huawei | default([]) 
+              + toip_gpon_huawei | default([])  + rtp_ngn_huawei | default([]) + datos_dslam_huawei_pppoe | default([]) }}"
+      when:
+        - "item | regex_search('(interface\\s+[G]\\w*[\\-\\/\\d\\w]*)\\.*\\d*') is not none"
+
+    # - name: Debug interface_fisica HUAWEI
+      # debug:
+        # msg: "{{ interface_fisica}}"
+
+
+    # - name: PAUSAR 20 segundos
+      # pause:
+        # seconds: 20
+############################# EXTRAE INTERFACES Eth-Trunk #####################################################
+
+    - name: ARMADO DE LISTA INTERFACES ETH-TRUNK HUAWEI
+      set_fact:
+        interface_eth_trunk: "{{interface_eth_trunk | default([]) + [item | regex_search('(interface\\s+[E]\\w*[\\-\\/\\d\\w]*)\\.*\\d*', '\\1') | first]}}"
+      delegate_to: localhost
+      with_items:
+        - "{{ toip_dslam_huawei | default([]) + datos_dslam_huawei | default([]) + datos_gpon_huawei | default([]) 
+              + toip_gpon_huawei | default([])  + rtp_ngn_huawei | default([]) + datos_dslam_huawei_pppoe | default([]) }}"
+      when:
+        - "item | regex_search('(interface\\s+[E]\\w*[\\-\\/\\d\\w]*)\\.*\\d*') is not none"
+
+    # - name: Debug interface_eth_trunk HUAWEI
+      # debug:
+        # msg: "{{ interface_eth_trunk}}"
+
+
+    - name: LISTAR INTERFACES VIRTUALES Eth-Trunk
+      ce_command:
+        commands:
+          - 'display {{item}}'
+      register: eth_trunk
+      retries: 2
+      delay: 2
+      until: eth_trunk is not failed 
+      with_items:
+        - "{{interface_eth_trunk | unique }}"
+      when:
+        - "interface_eth_trunk is defined"
+
+    - name: variable con output crudo
+      set_fact:
+        output_crudo: "{{output_crudo | default([]) + [ item['stdout_lines'][0]  ]  }}"
+      delegate_to: localhost
+      with_items:
+        - "{{eth_trunk['results']}}"
+      when: 
+        - "item['stdout_lines'][0]  is not none"
+        - "interface_eth_trunk is defined"
+
+    - name: variable con output crudo en forma de lista
+      set_fact:
+        output_compilado: "{{output_crudo | flatten  }}"
+      delegate_to: localhost
+      when: 
+        - "interface_eth_trunk is defined"
+
+    - name: LISTAR interfaces_compilado
+      set_fact:
+        interfaces_compilado: "{{ interfaces_compilado | default([]) + ['interface ' + item | regex_search('^(?!\\()([G]\\w*[\\-\\/\\d\\w]*)\\.*\\d*') | trim ]}}"
+      delegate_to: localhost
+      with_items:
+        - "{{output_compilado}}"
+      when: 
+        - "interface_eth_trunk is defined"
+        - "item | regex_search('^(?!\\()([G]\\w*[\\-\\/\\d\\w]*)\\.*\\d*') is not none"
+
+
+    - name: compilar todas las interfaces
+      set_fact:
+        total_interfaces: "{{ total_interfaces | default([]) + [ item ] }}" 
+      delegate_to: localhost        
+      with_items:
+        - "{{ interface_fisica | default([]) + interfaces_compilado | default([]) }}"
+      when: 
+        - "interface_fisica is defined or interfaces_compilado is defined"
+
+    - name: unificar todas las interfaces fisicas unicas
+      set_fact:
+        total_interfaces_unificadas: "{{ total_interfaces_unificadas | default([]) + [ item ] }}" 
+      delegate_to: localhost        
+      with_items:
+        - "{{ total_interfaces | unique }}"
+      when: 
+        - "total_interfaces is defined"
+        
+    # - name: PAUSAR 20 segundos
+      # pause:
+        # seconds: 20
+        
+########################### ARMADO INTERFACES Y SUB-INTERFACES HUAWEI #####################################################
+
+    - name: ALMACENAR CANTIDAD DE INTERFACES
+      set_fact: 
+        datos_dslam: "{{ '0' if (aux_datos_dslam_huawei is undefined) else aux_datos_dslam_huawei | count }}"
+        toip_dslam: "{{ '0' if (toip_dslam_huawei is undefined) else toip_dslam_huawei | count }}"
+        rtp_ngn: "{{ '0' if (rtp_ngn_huawei is undefined) else rtp_ngn_huawei | count }}"
+        datos_gpon: "{{ '0' if (datos_gpon_huawei is undefined) else datos_gpon_huawei | count }}"
+        toip_gpon: "{{ '0' if (toip_gpon_huawei is undefined) else toip_gpon_huawei | count }}"
+        total_interfaces_fisicas: "{{ '0' if (total_interfaces_unificadas is undefined) else total_interfaces_unificadas | count }}"
+        datos_dslam_pppoe: "{{ '0' if (datos_dslam_huawei_pppoe is undefined) else datos_dslam_huawei_pppoe | count }}"
+      delegate_to: localhost
+
+          
+    - name: ALMACENAR CANTIDAD TOTAL DE INTERFACES HUAWEI
+      set_fact: 
+        total_int_dslam: "{{datos_dslam | int + toip_dslam | int + rtp_ngn | int + datos_gpon | int + toip_gpon | int + total_interfaces_fisicas | int}}"
+      delegate_to: localhost
+
+    - name: EXPORTAR SALIDA INTERFACES FISICAS A DESPLEGAR HUAWEI 
+      lineinfile:
+        dest: "./roles/QoS_II/output/huawei/RESIDENCIAL/{{inventory_hostname}}_INTERFACES_FISICAS.txt"
+        line: "{{ item + port_queue }}"
+    # si no existe lo crea
+        create: yes
+    # permisos Lectura Escritura
+        mode: '666'
+        insertafter: EOF
+      with_items:
+        - "{{ total_interfaces_unificadas  }}"
+      when: 
+        - "total_interfaces is defined"
+        
+    - name: EXPORTAR SALIDA SUB-INTERFACES A DESPLEGAR HUAWEI 
+      lineinfile:
+        dest: "./roles/QoS_II/output/huawei/RESIDENCIAL/{{inventory_hostname}}_SUB_INTERFACES.txt"
+        line: "{{ item + trust if('4101' not in item) else item + undo_trust }}"
+    # si no existe lo crea
+        create: yes
+    # permisos Lectura Escritura
+        mode: '666'
+        insertafter: EOF
+      with_items:
+        - "{{ toip_dslam_huawei | default([]) + datos_dslam_huawei | default([]) + datos_gpon_huawei | default([]) 
+              + toip_gpon_huawei | default([])  + rtp_ngn_huawei | default([])}}"
+
+        
+    - name: EXPORTAR SALIDA SUB-INTERFACES PPPOE HUAWEI
+      lineinfile:
+        dest: "./roles/QoS_II/output/huawei/RESIDENCIAL/PPPOE/{{inventory_hostname}}_SUB_INTERFACES_PPPOE.txt" 
+        line: "{{ item }}"
+    # si no existe lo crea
+        create: yes
+    # permisos Lectura Escritura
+        mode: '666'
+        insertafter: EOF
+      with_items:
+        - "{{ datos_dslam_huawei_pppoe }}"
+      when:
+        - "datos_dslam_huawei_pppoe is defined"
+
+    - name: EXPORTAR SALIDA NODOS PPPOE HUAWEI
+      lineinfile:
+        dest: "./roles/QoS_II/output/huawei/RESIDENCIAL/PPPOE/listado_nodos_pppoe.csv" 
+        line: "{{inventory_hostname}};{{datos_dslam_pppoe}}"
+    # si no existe lo crea
+        create: yes
+    # permisos Lectura Escritura
+        mode: '666'
+        insertafter: EOF
+      with_items:
+        - "{{ datos_dslam_huawei_pppoe }}"
+      when:
+        - "datos_dslam_huawei_pppoe is defined"
+
+      
+    - name: EXPORTAR TOTAL DE INTERFACES A DESPLEGAR HUAWEI
+      lineinfile:
+        dest: "./roles/QoS_II/output/huawei/RESIDENCIAL/TOTAL_INTERFACES/total_interfaces_despliegue.csv"
+        line: "{{inventory_hostname}};{{total_int_dslam }}"
+    # si no existe lo crea
+        create: yes
+    # permisos Lectura Escritura
+        mode: '666'
+        insertafter: EOF
+      when:
+        - "total_int_dslam is defined"
+        
+    - name: CANTIDAD DE INTERFACES
+      debug:
+        msg: 
+          - "el nodo {{ inventory_hostname }} tiene un total de {{total_int_dslam}} interfaces :"
+          - "{{ '0' if (total_interfaces_unificadas is undefined) else total_interfaces_unificadas | count }} interfaces FISICAS"
+          - "{{ '0' if (datos_dslam_huawei is undefined) else datos_dslam_huawei | count }} interfaces SIN_PPPOE y 
+             {{ '0' if (datos_dslam_huawei_pppoe is undefined) else datos_dslam_huawei_pppoe | count }} interfaces PPPOE que hacen un total de
+             {{ '0' if (aux_datos_dslam_huawei is undefined) else aux_datos_dslam_huawei | count }} interfaces DATOS DSLAM"
+          - "{{ '0' if (toip_dslam_huawei is undefined) else toip_dslam_huawei | count }} interfaces TOIP DSLAM"
+          - "{{ '0' if (rtp_ngn_huawei is undefined) else rtp_ngn_huawei | count }} interfaces RTP NGN"
+          - "{{ '0' if (datos_gpon_huawei is undefined) else datos_gpon_huawei | count }} interfaces DATOS GPON"
+          - "{{ '0' if (toip_gpon_huawei is undefined) else toip_gpon_huawei | count }} interfaces TOIP GPON"
+          
+    - name: PAUSAR 10 segundos
+      pause:
+        seconds: 10

@@ -1,0 +1,100 @@
+---
+# - name: APLICACION DE QOS FASE II EN INTERFACES RESIDENCIAL NODOS HUAWEI
+  # hosts: NORMALIZACION
+  # connection: network_cli
+  # gather_facts: no
+  # serial: 1
+  # tasks:
+  
+#--------------------------LISTAR TAREAS-----------------------------------------------------------------
+#ansible-playbook QoS_II.yml --list-task
+
+#--------------------------APLCAR PLAYBOOK---------------------------------------------------------------
+#ansible-playbook QoS_II.yml -v --tags="configuration"
+#ansible-playbook QoS_II.yml -v -e icd=12127506
+#--------------------------------------------------------------------------------------------------------
+
+
+####################### IMPACTO DE QoS EN INTERFACES HUAWEI DESDE ARCHIVO CREADO ############################################################################3      
+
+    - name: VARIABLE NRO. ICD
+      set_fact: 
+        icd: "12127506"
+      delegate_to: localhost
+      
+    - name: CHEQUEAR SI EL ARCHIVO DE IMPACTO DE INTERFACES FISICAS HUAWEI EXISTE
+      stat:
+        path: "./roles/QoS_II/output/huawei/MOVIL/{{inventory_hostname}}/interfaces_FISICAS_MOVIL.txt"
+      register: file_checker
+
+    - name: CHEQUEAR SI EL ARCHIVO DE IMPACTO DE SUB_INTERFACES HUAWEI EXISTE
+      stat:
+        path: "./roles/QoS_II/output/huawei/MOVIL/{{inventory_hostname}}/interfaces_SUB_INTERFACES_MOVIL.txt"
+      register: file_checker_2
+
+    - name: CHEQUEAR SI EL ARCHIVO DE IMPACTO DE GE_VLAN INTERFACES HUAWEI EXISTE
+      stat:
+        path: "./roles/QoS_II/output/huawei/MOVIL/{{inventory_hostname}}/interfaces_GE_VLAN_MOVIL.txt"
+      register: file_checker_3
+      
+    - name: CHEQUEAR SI EL ARCHIVO DE IMPACTO DE ETH_VLAN INTERFACES HUAWEI EXISTE
+      stat:
+        path: "./roles/QoS_II/output/huawei/MOVIL/{{inventory_hostname}}/interfaces_ETH_VLAN_MOVIL.txt"
+      register: file_checker_4
+
+    - name: CHEQUEAR SI EL ARCHIVO DE INTERFACES RESIDENCIAL A REVISAR HUAWEI EXISTE
+      stat:
+        path: "./roles/QoS_II/output/huawei/MOVIL/{{inventory_hostname}}/interfaces_revisar_MOVIL.txt"
+      register: file_checker_5      
+
+
+    - name: LISTAR ARCHIVO DE DESPLIEGUE interfaces_FISICAS_MOVIL HUAWEI
+      debug:
+        msg:
+          - "{{ '!' if (not file_checker.stat.exists) else lookup('file', './roles/QoS_II/output/huawei/MOVIL/{{inventory_hostname}}/interfaces_FISICAS_MOVIL.txt', errors='ignore') }}"
+          - "{{ '!' if (not file_checker_2.stat.exists) else lookup('file', './roles/QoS_II/output/huawei/MOVIL/{{inventory_hostname}}/interfaces_SUB_INTERFACES_MOVIL.txt', errors='ignore') }}"
+          - "{{ '!' if (not file_checker_3.stat.exists) else lookup('file', './roles/QoS_II/output/huawei/MOVIL/{{inventory_hostname}}/interfaces_GE_VLAN_MOVIL.txt', errors='ignore') }}"
+          - "{{ '!' if (not file_checker_4.stat.exists) else lookup('file', './roles/QoS_II/output/huawei/MOVIL/{{inventory_hostname}}/interfaces_ETH_VLAN_MOVIL.txt', errors='ignore') }}"
+      # when: 
+        # - file_checker_2.stat.exists
+      # tags:
+        # - configuration
+        
+
+    # - name: LISTAR IMPACTO QoS HUAWEI INTERFACES FISICAS
+      # debug:
+        # msg: 
+    - name:  IMPACTO QoS HUAWEI INTERFACES FISICAS
+      ce_command:
+        commands:
+          - 'sys'
+          - "{{ '!' if (not file_checker.stat.exists) else lookup('file', './roles/QoS_II/output/huawei/MOVIL/{{inventory_hostname}}/interfaces_FISICAS_MOVIL.txt', errors='ignore') }}"
+          - "{{ '!' if (not file_checker_2.stat.exists) else lookup('file', './roles/QoS_II/output/huawei/MOVIL/{{inventory_hostname}}/interfaces_SUB_INTERFACES_MOVIL.txt', errors='ignore') }}"
+          - "{{ '!' if (not file_checker_3.stat.exists) else lookup('file', './roles/QoS_II/output/huawei/MOVIL/{{inventory_hostname}}/interfaces_GE_VLAN_MOVIL.txt', errors='ignore') }}"
+          - "{{ '!' if (not file_checker_4.stat.exists) else lookup('file', './roles/QoS_II/output/huawei/MOVIL/{{inventory_hostname}}/interfaces_ETH_VLAN_MOVIL.txt', errors='ignore') }}"
+          - 'commit label ICD_{{icd}}'
+      register: impacto_interfaces_qos
+      retries: 2
+      delay: 2
+      until: impacto_interfaces_qos is not failed
+      when: 
+        - file_checker.stat.exists
+      # tags:
+        # - configuration
+
+    - name: Validar SI EL ARCHIVO DE INTERFACES A DESPLEGAR HUAWEI EXISTE
+      assert:
+        that:
+          - file_checker.stat.exists
+          - file_checker_2.stat.exists
+        fail_msg: "fail. No existe archivos de interfaces moviles a desplegar del nodo {{inventory_hostname}}"
+        success_msg: "ok. Archivos de despliegue movil del Nodo {{inventory_hostname}} existen"
+        
+    - name: Validar SI EL ARCHIVO DE INTERFACES RESIDENCIAL A REVISAR HUAWEI EXISTE
+      assert:
+        that:
+          - not file_checker_5.stat.exists
+        fail_msg: "fail. Archivo de configuracion de interfaces a desplegar manual del nodo {{inventory_hostname}} existe"
+        success_msg: "ok. Se configuro la totalidad de interfaces moviles del Nodo {{inventory_hostname}}"
+
+

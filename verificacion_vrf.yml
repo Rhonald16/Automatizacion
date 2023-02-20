@@ -1,0 +1,410 @@
+#--------------------------LISTAR TAREAS-----------------------------------------------------------------
+#ansible-playbook obtener-hora.yml --list-task
+
+#--------------------------APLCAR PLAYBOOK---------------------------------------------------------------
+#ansible-playbook obtener-hora.yml -v -e "antigua_vrf=nombre_viejo nueva_vrf=nombre_nuevo"
+# -e recibo parametros por command line
+#--------------------------------------------------------------------------------------------------------
+#ansible-playbook Reporte_OSPF.yam --tags="cisco"
+#ansible-playbook Reporte_OSPF.yam --tags="huawei"
+#----------------------VERIFICACIONES -----------------
+
+---
+- name: Playbook for tests
+  hosts: NORMALIZACION
+  connection: network_cli
+  gather_facts: no
+  serial: 1
+  #vars: 
+  
+  tasks: 
+  
+
+    - name: BGP SUMMARY   
+      junos_command:
+        commands:
+          - 'show bgp summary'
+          
+      register: vrf
+      retries: 2
+      delay: 2
+      until: vrf is not failed
+      
+
+
+    - name: SALIDA BGP SUMM 
+      debug:
+        msg:
+          - "{{ vrf | to_nice_json }}"
+      
+      
+    # - name: vpn
+      # debug:
+        # msg: "{{ item | regex_search('(\\s+vpn-\\w+\\-\\w+\\-?\\w+\\-?\\w+)') | trim}}" 
+      # with_items:
+        # - "{{vrf.stdout_lines[0]}}"
+      # when:
+        # - "item | regex_search('(\\s+vpn-\\w+\\-\\w+\\-?\\w+\\-?\\w+)') is not none"
+      
+    - name: vpn
+      set_fact:
+        vpn: "{{ vpn | default([]) + [ item | regex_search('\\s+([vpn|VPN|VRF]+[\\-\\w]+)', '\\1') | first ] }}" 
+      with_items:
+        - "{{vrf.stdout_lines[0]}}"
+      when:
+        - "item | regex_search('\\s+([vpn|VPN|VRF]+\\-\\w+[\\-\\w]+)') is not none"
+      
+    
+    - name: SALIDA PARSEO VPN
+      debug:
+        msg:
+          # - "{{ vpn|unique | to_nice_json }}"
+          - "{{ vpn|unique | type_debug }}"
+      when:
+          - " vpn is defined "
+          
+    - name: vpn
+      set_fact:
+        vpn_uno: "{{ vpn_uno | default([]) + [ item ] }}" 
+      with_items:
+        - "{{vpn|unique}}"
+      # when:
+        # - "item | regex_search('\\s+([vpn|VPN|VRF]+\\-\\w+[\\-\\w]+)') is not none"
+          
+    - name: SALIDA PARSEO VPN UNO
+      debug:
+        msg:
+        - "{{ vpn_uno|unique | to_nice_json }}"
+        - "{{ vpn_uno | type_debug }}"
+      
+          
+          
+          
+    - name: VERIFICAR SERVICIOS EN VPN  
+      junos_command:
+        commands:
+          - 'show arp vpn {{item}} '
+          
+      register: servicios
+      until: servicios is not failed
+      retries: 2
+      delay: 2
+      with_items: "{{ vpn_uno }}"
+      
+      
+    - name: SALIDA SERVICIOS EN VPN 
+      debug:
+        msg:
+          - "{{servicios | to_nice_json }}"
+          
+      
+      
+    - name: CONFIGURACION INTERFACE
+      set_fact:
+        configuracion: "{{ configuracion | default([]) + [ item['stdout_lines'][0] |join('\n')  ]}}" 
+      with_items:
+        - "{{servicios['results']}}"
+      when:
+        - " item['stdout'][0] is not none"
+         
+        
+    - name: SALIDA CONFIGURACION VLAN 
+      debug:
+        msg:
+          - "{{ configuracion | to_nice_json }}"
+          - "{{ configuracion | type_debug }}"
+          
+          
+    - name: LISTAR AE VLAN Y CONF
+      debug:
+        msg: "{{item[0] + ' \n ' + item[1] }}"
+      with_together:
+          - "{{vpn_uno[:3]}}"
+          - "{{configuracion[:3]}}"
+          
+          
+    - name: EXPORTAR SALIDA DATOS
+      lineinfile:
+        dest: "/home/u623994/Ansible/Rhonald/output/Interface/{{inventory_hostname}}_VRF.txt" 
+        line: "{{ item[0] + '\n' + item[1] }}"
+      # si no existe lo crea
+        create: yes
+      # permisos Lectura Escritura
+        mode: '666'
+        insertafter: EOF
+      with_together:
+          - "{{vpn_uno}}"
+          - "{{configuracion}}"
+      
+  
+
+###################################### CONFIGURACION VRF ##################################################
+
+
+    - name: BGP SUMMARY   
+      junos_command:
+        commands:
+          - 'show bgp summary'
+          
+      register: vrf
+      retries: 2
+      delay: 2
+      until: vrf is not failed
+      tags:
+        - configuracion 
+      
+
+
+    - name: SALIDA BGP SUMM 
+      debug:
+        msg:
+          - "{{ vrf | to_nice_json }}"
+      tags:
+        - configuracion
+        
+        
+    - name: vpn
+      set_fact:
+        vpn: "{{ vpn | default([]) + [ item | regex_search('\\s+([vpn|VPN|VRF]+[\\-\\w]+)', '\\1') | first ] }}" 
+      with_items:
+        - "{{vrf.stdout_lines[0]}}"
+      when:
+        - "item | regex_search('\\s+([vpn|VPN|VRF]+\\-\\w+[\\-\\w]+)') is not none"
+      tags:
+        - configuracion
+      
+    
+    - name: SALIDA PARSEO VPN
+      debug:
+        msg:
+          - "{{ vpn|unique | to_nice_json }}"
+          # - "{{ vpn|unique | type_debug }}"
+      when:
+          - " vpn is defined "
+      tags:
+        - configuracion
+          
+    - name: vpn
+      set_fact:
+        vpn_uno: "{{ vpn_uno | default([]) + [ item ] }}" 
+      with_items:
+        - "{{vpn|unique}}"
+      # when:
+        # - "item | regex_search('\\s+([vpn|VPN|VRF]+\\-\\w+[\\-\\w]+)') is not none"
+      tags:
+        - configuracion
+          
+    - name: SALIDA PARSEO VPN UNO
+      debug:
+        msg:
+        - "{{ vpn_uno|unique | to_nice_json }}"
+        - "{{ vpn_uno | type_debug }}"
+      tags:
+        - configuracion
+      
+          
+          
+          
+    - name: VERIFICAR SERVICIOS EN VPN  
+      junos_command:
+        commands:
+          - 'show configuration | display set | match {{item}} '
+          
+      register: servicios
+      until: servicios is not failed
+      retries: 2
+      delay: 2
+      with_items: "{{ vpn_uno }}"
+      tags:
+        - configuracion
+      
+      
+    - name: SALIDA SERVICIOS EN VPN 
+      debug:
+        msg:
+          - "{{servicios | to_nice_json }}"
+      tags:
+        - configuracion
+          
+      
+      
+    - name: CONFIGURACION INTERFACE
+      set_fact:
+        configuracion: "{{ configuracion | default([]) + [ item['stdout_lines'][0] |join('\n')  ]}}" 
+      with_items:
+        - "{{servicios['results']}}"
+      when:
+        - " item['stdout'][0] is not none"
+      tags:
+        - configuracion
+         
+        
+    - name: SALIDA CONFIGURACION VLAN 
+      debug:
+        msg:
+          - "{{ configuracion | to_nice_json }}"
+          - "{{ configuracion | type_debug }}"
+      tags:
+        - configuracion
+          
+          
+    - name: LISTAR AE VLAN Y CONF
+      debug:
+        msg: "{{item[0] + ' \n ' + item[1] }}"
+      with_together:
+          - "{{vpn_uno[:5]}}"
+          - "{{configuracion[:5]}}"
+      tags:
+        - configuracion
+        
+    - name: EXPORTAR SALIDA DATOS
+      lineinfile:
+        dest: "/home/u623994/Ansible/Rhonald/output/Interface/{{inventory_hostname}}_VRF_CONF.txt" 
+        line: "{{ item[0] + '\n' + item[1] }}"
+      # si no existe lo crea
+        create: yes
+      # permisos Lectura Escritura
+        mode: '666'
+        insertafter: EOF
+      with_together:
+          - "{{vpn_uno}}"
+          - "{{configuracion}}"
+      tags:
+        - configuracion
+        
+    
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+    # - name: Parseo IP VPN
+      # set_fact:
+        # ip_vpn: "{{ ip_vpn | default([]) + [ 's/ip' if('MAC' not in item) else item  | regex_search('(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})', '\\1') | first ] }}"
+      # with_items:
+        # - "{{servicios['results']}}"
+      # when:
+        # - " item['stdout'][0] is not none"
+          
+    # - name: variable con output crudo
+      # set_fact:
+        # output_crudo: "{{output_crudo | default([]) + [ item['stdout_lines'][0]  ] }}"
+      # delegate_to: localhost
+      # with_items:
+        # - "{{servicios['results']}}"
+      # when: 
+        # - "item['stdout_lines'][0]  is not none"
+        
+    # - name: SALIDA SERVICIOS EN VPN 
+      # debug:
+        # msg:
+          # - "{{output_crudo | to_nice_json }}"
+          # - "{{output_crudo | type_debug }}"
+          
+    # - name: variable con output crudo en forma de lista
+      # set_fact:
+        # output_compilado: "{{ output_crudo | flatten(levels=1)  }}"
+      # delegate_to: localhost
+      
+    # - name: SALIDA SERVICIOS EN VPN FLATTEN 
+      # debug:
+        # msg:
+          # - "{{output_compilado | to_nice_json }}"
+          # - "{{output_compilado | type_debug }}"
+          
+          
+    # - name: variable con output crudo en forma de lista
+      # set_fact:
+        # output_compilado: "{{ output_crudo | flatten  }}"
+      # delegate_to: localhost
+      
+    # - name: SALIDA SERVICIOS EN VPN FLATTEN 
+      # debug:
+        # msg:
+          # - "{{output_compilado | to_nice_json }}"
+          # - "{{output_compilado | type_debug }}"
+      
+    
+          
+    # - name: PLACAS A CAMBIAR
+      # debug:
+        # msg: "{{ item | regex_findall('(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})') }}" 
+      # with_items:
+        # - "{{output_compilado}}"
+      # when:
+        # - "item | regex_search('([R]\\w+\\s+[E]\\w+\\s+\\d+.*|[C]\\w+\\s+\\d+.*)') is not none"  
+        
+        
+    # - name: LISTAR interfaces_compilado
+      # set_fact:
+        # interfaces_compilado: "{{ interfaces_compilado | default([]) + [ item | regex_search('(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})') ]}}"
+      # delegate_to: localhost
+      # with_items:
+        # - "{{output_crudo}}"
+      # when:
+        # - "item | regex_search('(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})') is not none"
+
+    # - name: LISTAR interfaces_compilado
+      # debug:
+        # msg: "{{interfaces_compilado}}"
+      # when: 
+        # - "interface_virtual is defined"
+          
+    # - name: Parseo IP VPN
+      # set_fact:
+        # ip_vpn: "{{ ip_vpn | default([]) + [ 's/ip' if('MAC' not in item['stdout'][0]) else item['stdout_lines'][0]  | regex_search('(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})', '\\1') | first ] }}"
+      # with_items:
+        # - "{{servicios['results'][stdout_lines][0]}}"
+      # when:
+        # - " item['stdout'][0] is not none"
+    
+        
+    # - name: SALIDA SERVICIOS EN VPN 
+      # debug:
+        # msg:
+          # - "{{ip_vpn | to_nice_json }}"
+      
+        
+        
+    # - name: PING A SERVICIOS DE VPN 
+      # junos_command:
+        # commands:
+          # - 'ping routing-instance {{vpn}} {{item}} count 5'
+          
+      # register: ping
+      # until: ping is not failed
+      # retries: 2
+      # delay: 2
+      # with_items: "{{ ip_vpn }}"
+     
+
+
+    # - name: SALIDA PING A SERVICIOS DE VPN  
+      # debug:
+        # msg:
+          # - "{{ping | to_nice_json }}"
+     
+        
+    # - name: PING A SERVICIOS DE VPN
+      # set_fact:
+        # resultado_ping: "{{ resultado_ping | default([]) + [ item['stdout_lines'][0][1:7] ]}}" 
+      # with_items:
+        # - "{{ping['results']}}"
+      # when:
+        # - " item['stdout'][0] is not none"
+        
+    # - name: SALIDA PING A SERVICIOS DE VPN  
+      # debug:
+        # msg:
+          # - "{{resultado_ping | to_nice_json }}"
+     
+      

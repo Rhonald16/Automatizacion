@@ -1,0 +1,4 @@
+---
+# - include: despliegue_TWAMP_H.yml
+# - include: despliegue_TWAMP_C.yml
+- include: verificacion_ping_H.yml

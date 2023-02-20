@@ -1,0 +1,182 @@
+---
+# - name: MI PRIMER PLAYBOOK
+  # hosts: NORMALIZACION
+  # connection: network_cli
+  # gather_facts: no
+  # tasks:
+#--------------------------LISTAR TAREAS-----------------------------------------------------------------
+#ansible-playbook QoS_MOVIL.yml --list-task
+
+#--------------------------APLCAR PLAYBOOK---------------------------------------------------------------
+#ansible-playbook QoS_MOVIL.yml -v
+#--------------------------------------------------------------------------------------------------------
+
+
+ #----------------LISTAR INTERFACES CON VRF vpn-personal-iub-3G---------------
+ 
+    - name: LISTAR INTERFACES CON VRF vpn-personal-iub-3G
+      iosxr_command:
+        commands:
+          - 'sh ipv4 vrf vpn-personal-iub-3G interface brief'
+          - 'sh ipv4 vrf VPN-PERSONAL-ABIS-2G-BSC interface brief'
+          - 'sh ipv4 vrf VPN-PERSONAL-IUB-3G-RNC interface brief'
+          - 'show ipv4 vrf VRF-CABLE-PERSONAL-Wan3G-ACCESO interface brief'
+      register: vrf
+      retries: 2
+      delay: 2
+      until: vrf is not failed
+      
+
+############################# EXTRAE INTERFACES FISICAS #####################################################
+
+    
+    # - name: LISTAR INTERFACES
+      # debug:
+        # msg: "{{ item | regex_search('([B|L|P|T|M|G|X]\\w*[\\-\\/\\d\\w]*)\\.\\d*', '\\1') | first}}"
+        # msg: "{{ item | regex_search('([T|G|X]\\w*[\\-\\/\\d\\w]*)\\.\\d*', '\\1') | first}}"
+      # with_items:
+        # - "{{vrf['stdout_lines'][0]}}"
+      # when: 
+        # - "item | regex_search('([B|L|P|T|M|G|X]\\w*[\\-\\/\\d\\w]*)\\.\\d*') is not none"
+        # - "item | regex_search('([T|G|X]\\w*[\\-\\/\\d\\w]*)\\.\\d*') is not none"
+
+
+    - name: LISTAR INTERFACES FISICAS CISCO
+      set_fact:
+        interface_fisica: "{{ interface_fisica | default([]) + ['interface ' + item | regex_search('([T|G|X]\\w*[\\-\\/\\d\\w]*)\\.*\\d*\\s+', '\\1') | first ] }}"
+      delegate_to: localhost
+      with_items:
+        - "{{vrf['stdout_lines'][0] + vrf['stdout_lines'][1] + vrf['stdout_lines'][2] + vrf['stdout_lines'][3]}}"
+      when: 
+        - "item | regex_search('([T|G|X]\\w*[\\-\\/\\d\\w]*)\\.*\\d*\\s+') is not none "
+
+############################# EXTRAE INTERFACES VIRTUALES #####################################################
+
+    - name: LISTAR INTERFACES VIRTUALES CISCO
+      set_fact:
+        interface_virtual: "{{interface_virtual | default([]) + ['interface ' + item | regex_search('([B]\\w*[\\-\\/\\d\\w]*)\\.*\\d*\\s+', '\\1') | first] }}"
+      delegate_to: localhost
+      with_items:
+        - "{{vrf['stdout_lines'][0] + vrf['stdout_lines'][1] + vrf['stdout_lines'][2] + vrf['stdout_lines'][3]}}"
+      when: 
+        - "item | regex_search('([B]\\w*[\\-\\/\\d\\w]*)\\.*\\d*\\s+') is not none"
+
+
+    - name: LISTAR INTERFACES VIRTUALES BUNDLE
+      iosxr_command:
+        commands:
+          - 'sh {{item}}'
+      register: virtual
+      retries: 2
+      delay: 2
+      until: virtual is not failed 
+      with_items:
+        - "{{interface_virtual | unique }}"
+      when:
+        - "interface_virtual is defined"
+
+
+
+    - name: variable con output crudo
+      set_fact:
+        output_crudo: "{{output_crudo | default([]) + [ item['stdout_lines'][0]  ]  }}"
+      with_items:
+        - "{{virtual['results']}}"
+      when: 
+        - "item['stdout_lines'][0]  is not none"
+        - interface_virtual is defined        
+
+
+    - name: variable con output crudo en forma de lista
+      set_fact:
+        output_compilado: "{{output_crudo | flatten  }}"
+      when: 
+        - interface_virtual is defined
+
+    - name: DEBUG VARIABLE compilado
+      set_fact:
+        interfaces_compilado: "{{ interfaces_compilado | default([]) + ['interface ' + item | regex_search('^\\s+([T|G|X]\\w*[\\-\\/\\d\\w]*)\\.*\\d*\\s+') | trim ]}}"
+      with_items:
+        - "{{output_compilado}}"
+      when: 
+        - "interface_virtual is defined"
+        - "item | regex_search('^\\s+([T|G|X]\\w*[\\-\\/\\d\\w]*)\\.*\\d*\\s+') is not none" 
+        
+ 
+    # - name: debug condicionales
+      # debug:
+        # msg: 
+          # -  "{{ interface_fisica is defined }}"
+          # -  "{{ interfaces_compilado is defined }}"
+
+        
+    # - name: debug condicionales
+      # debug:
+        # msg:
+          # - "{{  interface_fisica | default([])  + interfaces_compilado | default([])  }}"
+      # when: 
+        # - "interfaces_compilado is defined or interface_fisica is defined"
+
+
+ ############################# ESCRITURA INTERFACES FISICAS Y VIRTUALES #####################################################
+ 
+    - name: EXPORTAR SALIDA INTERFACES A DESPLEGAR CISCO
+      lineinfile:
+        dest: './roles/QoS_MOVIL/output/cisco/{{inventory_hostname}}_INTERFACES_C.txt'
+        line: "{{ item }}"
+    # si no existe lo crea
+        create: yes
+    # permisos Lectura Escritura
+        mode: '666'
+        insertafter: EOF
+      with_items:
+        - "{{ interface_fisica | default([]) + interfaces_compilado | default([]) }}"
+      when: 
+        - "interface_fisica is defined or interfaces_compilado is defined"        
+        
+###################### DESPLIEGUE QoS CISCO ##############################################################################    
+ 
+    - name: CHEQUEAR SI EL ARCHIVO DE INTERFACES CISCO EXISTE
+      stat:
+        path: './roles/QoS_MOVIL/output/cisco/{{inventory_hostname}}_INTERFACES_C.txt'
+      register: file_checker
+ 
+
+    - name: LISTAR QoS CISCO INTERFACES
+      debug:
+        msg: 
+    # - name:  IMPACTO QoS CISCO INTERFACES
+      # iosxr_command:
+        # commands:
+          - 'configure terminal'
+          - '{{item}}'
+          - 'service-policy output TECO-QoS-Scheduller'
+          - 'commit'
+      # register: interface
+      # retries: 2
+      # delay: 2
+      # until: interface is not failed
+      with_items: "{{lookup('file', './roles/QoS_MOVIL/output/cisco/{{inventory_hostname}}_INTERFACES_C.txt', errors='ignore').splitlines()}}"
+      when: file_checker.stat.exists
+      
+########################################################################################################################
+
+    # - name: CHEQUEAR SI EL ARCHIVO DE INTERFACES CISCO EXISTE
+      # stat:
+        # path: './roles/QoS_MOVIL/templates/nodos_config/{{inventory_hostname}}.txt'
+      # register: file_checker
+ 
+
+    # - name: LISTAR QoS CISCO INTERFACES
+      # debug:
+        # msg: 
+    # - name:  IMPACTO QoS CISCO INTERFACES
+      # iosxr_command:
+        # commands:
+          # - '{{item}}'
+      # register: interface
+      # retries: 2
+      # delay: 2
+      # until: interface is not failed
+      # with_items: "{{lookup('file', './roles/QoS_MOVIL/templates/nodos_config/{{inventory_hostname}}.txt', errors='ignore').splitlines()}}"
+      # when: file_checker.stat.exists
