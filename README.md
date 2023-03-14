@@ -10,3 +10,9 @@ Coincidencias Basicas
 - \W &nbsp;  No es un Caracter de Palabra.
 - \s &nbsp;  Espacios de cualquier tipo. (espacio, tab, nueva linea)
 - \S &nbsp;  No es un Espacio, Tab o nueva linea.
+
+Limites
+- \b  &nbsp;  Limite de Palabra
+- \B  &nbsp;  No es un Limite de Palabra
+- ^   &nbsp;  Inicio de una cadena de texto
+- $   &nbsp;  Final de una cadena de texto
