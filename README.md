@@ -3,7 +3,7 @@
 
 Coincidencias Basicas 
 
--  .   Cualquier Caracter, excepto nueva linea
+-  .   Cualquier Caracter, excepto nueva linea <br>
 - \d   Cualquier Digitos (0-9)
 - \D   No es un Digito (0-9)
 - \w   Caracter de Palabra (a-z, A-Z, 0-9, _)
