@@ -16,3 +16,18 @@ Limites
 - \B  &nbsp;  No es un Limite de Palabra
 - ^   &nbsp;  Inicio de una cadena de texto
 - $   &nbsp;  Final de una cadena de texto
+
+Cuantificadores:
+- '*  &nbsp;     0 o Más
+- '+  &nbsp;     1 o Más
+- ?   &nbsp;     0 o Uno
+- {3} &nbsp;     Numero Exacto
+- {3,4} &nbsp;   Rango de Numeros (Minimo, Maximo)
+
+Conjuntos de Caracteres
+- []       Caracteres dentro de los brackets
+- [^ ]     Caracteres que NO ESTAN dentro de los brackets
+
+Grupos
+- ( )      Grupo
+- |        Uno u otro
