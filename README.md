@@ -3,9 +3,9 @@
 
 Coincidencias Basicas 
 
--  .        Cualquier Caracter, excepto nueva linea
--  \d       Cualquier Digitos (0-9)
-&nbsp; \D      - No es un Digito (0-9)
+-  .    Cualquier Caracter, excepto nueva linea
+- \d    Cualquier Digitos (0-9)
+- \D    No es un Digito (0-9)
 \w      - Caracter de Palabra (a-z, A-Z, 0-9, _)
 \W      - No es un Caracter de Palabra.
 \s      - Espacios de cualquier tipo. (espacio, tab, nueva linea)
